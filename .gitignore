@@ -1,0 +1,5 @@
+build/
+cmake_build_linux/
+_install/
+.vscode/
+.DS_Store
