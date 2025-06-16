@@ -146,8 +146,7 @@ target_link_libraries(${MYPROJ} PRIVATE
   glm
 )
 
-target_include_directories(${MYPROJ} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}}
-)
+target_include_directories(${MYPROJ} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Define VK_NO_PROTOTYPES to avoid including Vulkan prototypes
 # This is necessary because we are using volk to load Vulkan functions
@@ -187,13 +186,46 @@ if( Vulkan_SLANGC_EXECUTABLE)
         target_compile_definitions(${MYPROJ} PRIVATE USE_SLANG)
     endif()
 
-    # Include Slang headers
-    target_include_directories(${MYPROJ} PRIVATE "${Vulkan_INCLUDE_DIRS}/slang")
+   
 
     # Link to Slang libraries
-    target_link_libraries(${MYPROJ} PRIVATE
-        "${_Vulkan_LIB_DIR}/slang.lib"
-    )
+    # Ensure we compute a valid path to slang.lib
+    get_filename_component(_Vulkan_SDK_DIR "${Vulkan_LIBRARY}" DIRECTORY)
+    get_filename_component(_Vulkan_SDK_DIR "${_Vulkan_SDK_DIR}" DIRECTORY) # up one more level
+    set(SLANG_LIB_PATH "${_Vulkan_SDK_DIR}/Lib/slang.lib")
+
+    if(EXISTS "${SLANG_LIB_PATH}")
+      message(STATUS "Found slang.lib at: ${SLANG_LIB_PATH}")
+      target_link_libraries(${MYPROJ} PRIVATE "${SLANG_LIB_PATH}")
+    else()
+      message(FATAL_ERROR "Could not find slang.lib at expected location: ${SLANG_LIB_PATH}")
+    endif()
+
+    # Setup glslang paths (adjust if needed)
+    get_filename_component(_Vulkan_SDK_DIR "${Vulkan_LIBRARY}" DIRECTORY)
+    get_filename_component(_Vulkan_SDK_DIR "${_Vulkan_SDK_DIR}" DIRECTORY) # up one more level
+    set(SHADERC_INCLUDE_DIR "${_Vulkan_SDK_DIR}/Include/shaderc")
+    
+    set(SHADERC_LIB_RELEASE "${_Vulkan_SDK_DIR}/Lib/shaderc_combined.lib")
+    set(SHADERC_LIB_DEBUG   "${_Vulkan_SDK_DIR}/Lib/shaderc_combinedd.lib")
+    # Link to shaderc.lib
+    if(EXISTS "${SHADERC_LIB_RELEASE}" AND EXISTS "${SHADERC_LIB_DEBUG}")
+  message(STATUS "Found shaderc combined libs (release and debug)")
+  target_include_directories(${MYPROJ} PRIVATE "${SHADERC_INCLUDE_DIR}")
+
+  target_link_libraries(${MYPROJ} PRIVATE
+    "$<$<CONFIG:Debug>:${SHADERC_LIB_DEBUG}>"
+    "$<$<NOT:$<CONFIG:Debug>>:${SHADERC_LIB_RELEASE}>"
+  )
+else()
+  message(FATAL_ERROR "Could not find shaderc combined libraries at expected locations")
+endif()
+
+     # Include Slang/Shaderc headers
+    target_include_directories(${MYPROJ} PRIVATE
+  "${SLANG_INCLUDE_DIR}"
+  "${SHADERC_INCLUDE_DIR}"
+)
 
     set(_SLANG_FLAGS
         -profile sm_6_6+spirv_1_6

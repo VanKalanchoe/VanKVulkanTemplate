@@ -3,6 +3,7 @@
 #include <SDL3/SDL_log.h>
 #include <SDL3/SDL_vulkan.h>
 #include <SDL3/SDL_timer.h>
+#include <SDL3/SDL_filesystem.h>
 #include <iostream>
 
 /*--
@@ -119,9 +120,11 @@ namespace shaderio
 #define ASSERT(condition, message) assert((condition) && (message))
 #endif
 
-#include "slang.h"
-#include "slang-com-helper.h"
-#include "slang-com-ptr.h"
+#include "slang/slang.h"
+#include "slang/slang-com-helper.h"
+#include "slang/slang-com-ptr.h"
+
+#include <shaderc/shaderc.hpp>
 
 struct CompileResult
 {

@@ -826,7 +826,7 @@ void VulkanRendererAPI::recordGraphicCommands(VanKCommandBuffer cmd)
 /*--
    * The graphic pipeline is all the stages that are used to render a section of the scene.
    * Stages like: vertex shader, fragment shader, rasterization, and blending.
-  -*/
+--*/
 std::string loadFileContents(const std::string& path)
 {
     std::ifstream file(path);
@@ -976,7 +976,56 @@ CompileResult compileSlangToSpirv(
     result.succeeded = true;
     return result;
 }
-#include <SDL3/SDL_filesystem.h>
+
+CompileResult compileGlslToSpirv(
+    const std::string& sourceName,
+    const std::string& sourceCode,
+    const std::string& filePath) // for extension detection
+{
+    CompileResult result;
+    shaderc::Compiler compiler;
+    shaderc::CompileOptions options;
+
+    // Set Vulkan-friendly options
+    options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_3);
+    options.SetSourceLanguage(shaderc_source_language_glsl);
+    options.SetForcedVersionProfile(460, shaderc_profile_core); // Force #version 450 core
+    options.SetOptimizationLevel(shaderc_optimization_level_performance);
+
+    shaderc_shader_kind kind;
+    if (filePath.ends_with(".vert.glsl"))
+    {
+        kind = shaderc_glsl_vertex_shader;
+    }
+    else if (filePath.ends_with(".frag.glsl"))
+    {
+        kind = shaderc_glsl_fragment_shader;
+    }
+    else if (filePath.ends_with(".comp.glsl"))
+    {
+        kind = shaderc_glsl_compute_shader;
+    }
+    else
+    {
+        throw std::runtime_error("Unrecognized shader extension for: " + filePath);
+    }
+
+    shaderc::SpvCompilationResult module =
+        compiler.CompileGlslToSpv(sourceCode, kind, sourceName.c_str(), options);
+
+    result.diagnostics = module.GetErrorMessage();
+
+    if (module.GetCompilationStatus() != shaderc_compilation_status_success)
+    {
+        std::cerr << "Shaderc compilation failed: " << result.diagnostics << "\n";
+        return result;
+    }
+
+    result.spirvCode.assign(module.cbegin(), module.cend());
+    result.succeeded = true;
+    return result;
+}
+
 std::string getCachedShaderPath(const std::string& filename)
 {
     const char* basePath = SDL_GetBasePath();
@@ -987,11 +1036,11 @@ std::string getCachedShaderPath(const std::string& filename)
 
     std::filesystem::path path(basePath);
 
-    path /= "cache";                         // Append 'cache' directory
+    path /= "cache"; // Append 'cache' directory
     std::filesystem::create_directories(path); // Ensure it exists
-    path /= filename;                        // Append the actual filename
+    path /= filename; // Append the actual filename
 
-    return path.string();                    // Return full path as std::string
+    return path.string(); // Return full path as std::string
 }
 
 std::vector<uint32_t> loadOrCompileShader(
@@ -1001,7 +1050,13 @@ std::vector<uint32_t> loadOrCompileShader(
     const std::string& cacheFilename)
 {
     std::string sourceCode = loadFileContents(sourcePath);
+#ifdef USE_SLANG
     CompileResult result = compileSlangToSpirv(moduleName, sourcePath, sourceCode, entryPoint);
+    std::cout << "Compiled with Slang" << '\n';
+#else
+    CompileResult result = compileGlslToSpirv(moduleName, sourceCode, sourcePath);
+    std::cout << "Compiled with Shaderc vert frag" << '\n';
+#endif
 
     const std::string cachePath = getCachedShaderPath(cacheFilename);
 
@@ -1026,7 +1081,7 @@ std::vector<uint32_t> loadOrCompileShader(
 void VulkanRendererAPI::createGraphicsPipeline()
 {
     const std::vector<std::string> searchPaths = {".", "shaders", "../shaders", "../../shaders"};
-    
+
 #ifdef USE_SLANG
     std::string shaderFile = utils::findFile("shader.rast.slang", searchPaths);
     std::cout << "Shader file: " << shaderFile << '\n';
@@ -1034,7 +1089,18 @@ void VulkanRendererAPI::createGraphicsPipeline()
     // Load and compile vertex shader
     std::vector<uint32_t> vertSpv = loadOrCompileShader("vertexModule", shaderFile, "vertexMain", "vertex.spv");
     std::vector<uint32_t> fragSpv = loadOrCompileShader("fragmentModule", shaderFile, "fragmentMain", "fragment.spv");
+#else
+    std::string vertShaderFile = utils::findFile("shader.vert.glsl", searchPaths);
+    std::cout << "Shader file: " << vertShaderFile << '\n';
 
+    std::string fragShaderFile = utils::findFile("shader.frag.glsl", searchPaths);
+    std::cout << "Shader file: " << fragShaderFile << '\n';
+
+    // Load and compile vertex shader
+    std::vector<uint32_t> vertSpv = loadOrCompileShader("vertexModule", vertShaderFile, "main", "vertex.spv");
+    std::vector<uint32_t> fragSpv = loadOrCompileShader("fragmentModule", fragShaderFile, "main", "fragment.spv");
+
+#endif
     // Spir-V to shader modules
 
     const char* vertEntryName = "main";
@@ -1047,17 +1113,17 @@ void VulkanRendererAPI::createGraphicsPipeline()
     VkShaderModule fragShaderModule = utils::createShaderModule(
         m_context.getDevice(), fragSpv);
     DBG_VK_NAME(fragShaderModule);
-#else
-    const char* vertEntryName = "main";
-    const char* fragEntryName = "main";
-
-    VkShaderModule vertShaderModule =
-        utils::createShaderModule(m_context.getDevice(), {shader_vert_glsl, std::size(shader_vert_glsl)});
-    DBG_VK_NAME(vertShaderModule);
-    VkShaderModule fragShaderModule =
-        utils::createShaderModule(m_context.getDevice(), {shader_frag_glsl, std::size(shader_frag_glsl)});
-    DBG_VK_NAME(fragShaderModule);
-#endif
+    /*#else
+        const char* vertEntryName = "main";
+        const char* fragEntryName = "main";
+    
+        VkShaderModule vertShaderModule =
+            utils::createShaderModule(m_context.getDevice(), {shader_vert_glsl, std::size(shader_vert_glsl)});
+        DBG_VK_NAME(vertShaderModule);
+        VkShaderModule fragShaderModule =
+            utils::createShaderModule(m_context.getDevice(), {shader_frag_glsl, std::size(shader_frag_glsl)});
+        DBG_VK_NAME(fragShaderModule);
+    #endif*/
 
     VkBool32 useTexture = VK_TRUE; // Change to VK_FALSE for the pipeline that does not use textures
 
@@ -1263,9 +1329,9 @@ void VulkanRendererAPI::createGraphicsPipeline()
     // Clean up the shader modules
     vkDestroyShaderModule(m_context.getDevice(), vertShaderModule, nullptr);
     vkDestroyShaderModule(m_context.getDevice(), fragShaderModule, nullptr);
-#ifndef USE_SLANG
-    vkDestroyShaderModule(m_context.getDevice(), fragShaderModule, nullptr);
-#endif  // USE_SLANG
+    /*#ifndef USE_SLANG
+        vkDestroyShaderModule(m_context.getDevice(), fragShaderModule, nullptr);
+    #endif  // USE_SLANG*/
 }
 
 /*-- Initialize ImGui -*/
