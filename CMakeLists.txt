@@ -187,6 +187,14 @@ if( Vulkan_SLANGC_EXECUTABLE)
         target_compile_definitions(${MYPROJ} PRIVATE USE_SLANG)
     endif()
 
+    # Include Slang headers
+    target_include_directories(${MYPROJ} PRIVATE "${Vulkan_INCLUDE_DIRS}/slang")
+
+    # Link to Slang libraries
+    target_link_libraries(${MYPROJ} PRIVATE
+        "${_Vulkan_LIB_DIR}/slang.lib"
+    )
+
     set(_SLANG_FLAGS
         -profile sm_6_6+spirv_1_6
         -capability spvInt64Atomics+spvShaderInvocationReorderNV+spvShaderClockKHR+spvRayTracingMotionBlurNV

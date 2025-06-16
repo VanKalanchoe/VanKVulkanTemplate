@@ -3541,6 +3541,10 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event)
             {
                 Renderer::useImGui();
             }
+          if (event->key.scancode == SDL_SCANCODE_C)
+          {
+            Renderer::reloadGraphicsPipeline();
+          }
         }
     default: ;
     }

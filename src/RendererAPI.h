@@ -40,6 +40,9 @@ public:
     virtual void renderImGui(VanKCommandBuffer cmd) = 0;
     virtual void BlitGBufferToSwapchain(VanKCommandBuffer cmd) = 0;
     virtual int32_t* downloadColorAttachmentEntityID() = 0;
+    virtual void destroyGraphicsPipeline() const = 0;
+    virtual void createGraphicsPipeline() = 0;
+    virtual void waitForGraphicsQueueIdle() = 0;
 
     // In RendererAPI.h
     virtual void SetVSync(bool enable) = 0;

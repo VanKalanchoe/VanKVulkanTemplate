@@ -38,6 +38,12 @@ public:
     
     static int32_t* downloadColorAttachmentEntityID() { return s_RendererAPI ? s_RendererAPI->downloadColorAttachmentEntityID() : nullptr; }
 
+    static void destroyGraphicsPipeline() { if (s_RendererAPI) s_RendererAPI->destroyGraphicsPipeline(); }
+
+    static void createGraphicsPipeline() { if (s_RendererAPI) s_RendererAPI->createGraphicsPipeline(); }
+
+    static void waitForGraphicsQueueIdle() { if (s_RendererAPI) s_RendererAPI->waitForGraphicsQueueIdle(); }
+
     static void SetVSync(bool enable)
     {
         if (s_RendererAPI)

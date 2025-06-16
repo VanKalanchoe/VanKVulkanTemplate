@@ -23,6 +23,8 @@ public:
     static void rendererEvent(SDL_Event* event);
     static void OnViewportSizeChange(const Extent2D& newSize); // Called from SDL or main loop
 
+    static void reloadGraphicsPipeline();
+
     static bool m_useImGui; // Flag to control ImGui rendering
     static bool m_windowResized;
     static Extent2D lastViewportSize;

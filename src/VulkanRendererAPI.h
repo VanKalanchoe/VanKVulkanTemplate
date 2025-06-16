@@ -119,6 +119,22 @@ namespace shaderio
 #define ASSERT(condition, message) assert((condition) && (message))
 #endif
 
+#include "slang.h"
+#include "slang-com-helper.h"
+#include "slang-com-ptr.h"
+
+struct CompileResult
+{
+    std::vector<uint32_t> spirvCode; // Filled on success
+    std::string diagnostics; // Populated with diagnostics or errors, empty if none
+    bool succeeded = false;
+};
+
+CompileResult compileSlangToSpirv(
+    const std::string& moduleName,
+    const std::string& filePath,
+    const std::string& sourceCode,
+    const std::string& entryPointName);
 
 //--- Geometry -------------------------------------------------------------------------------------------------------------
 
@@ -2057,10 +2073,13 @@ namespace utils
     {
         for (const auto& path : searchPaths)
         {
-            const std::filesystem::path filePath = std::filesystem::path(path) / filename;
+            std::filesystem::path filePath = std::filesystem::path(path) / filename;
             if (std::filesystem::exists(filePath))
             {
-                return filePath.string();
+                // Convert path to string with forward slashes:
+                std::string result = filePath.make_preferred().string();
+                std::replace(result.begin(), result.end(), '\\', '/');
+                return result;
             }
         }
         LOGE("File not found: %s", filename.c_str());
@@ -2117,8 +2136,9 @@ public:
         return {reinterpret_cast<void*>(m_swapchain.getNextImage())};
     }
 
-    ImageHandle GetImGuiTextureID(uint32_t index = 0) const override {
-        return { reinterpret_cast<void*>(m_gBuffer.getImTextureID(index)) };
+    ImageHandle GetImGuiTextureID(uint32_t index = 0) const override
+    {
+        return {reinterpret_cast<void*>(m_gBuffer.getImTextureID(index))};
     }
 
     Extent2D GetViewportSize() const override
@@ -2136,11 +2156,13 @@ public:
         return reinterpret_cast<void*>(m_window);
     }
 
-    int GetImageID() const override {
+    int GetImageID() const override
+    {
         return m_imageID;
     }
 
-    void SetImageID(int id) override {
+    void SetImageID(int id) override
+    {
         /*if (id >= 0 && id < m_gBuffer.getImageCount())
             m_imageID = id;*/ //maybe ??
         m_imageID = id;
@@ -2174,6 +2196,7 @@ private:
      *    - Sets up ImGui for UI rendering
     -*/
     void init();
+    void destroyGraphicsPipeline() const override;
 
     /*--
      * Destroy all resources and the Vulkan context
@@ -2222,9 +2245,9 @@ private:
      * 
      * Note: Uses dynamic rendering instead of traditional render passes
     -*/
-    
+
     void drawFrame();
-    
+
     /*---
      * Begin frame is the first step in the rendering process.
      * It looks if the swapchain require rebuild, which happens when the window is resized.
@@ -2251,7 +2274,7 @@ private:
 
     void OnViewportSizeChange(const Extent2D& size) override;
 
-    
+
     /*--
      * We are using dynamic rendering, which is a more flexible way to render to the swapchain image.
     -*/
@@ -2283,7 +2306,10 @@ private:
      * The graphic pipeline is all the stages that are used to render a section of the scene.
      * Stages like: vertex shader, fragment shader, rasterization, and blending.
     -*/
-    void createGraphicsPipeline();
+    void createGraphicsPipeline() override;
+
+    /*-- Wait until GPU is done using the pipeline to safly destroy --*/
+    void waitForGraphicsQueueIdle() override;
 
     /*-- Initialize ImGui -*/
     void initImGui();
@@ -2293,7 +2319,7 @@ private:
 
     /*-- Blit SwapChain --*/
     void BlitGBufferToSwapchain(VanKCommandBuffer cmd) override;
-    
+
     /*--
      * The Descriptor Pool is used to allocate descriptor sets.
      * Currently, only ImGui requires a combined image sampler.

@@ -43,6 +43,13 @@ void Renderer::OnViewportSizeChange(const Extent2D& newSize)
     }
 }
 
+void Renderer::reloadGraphicsPipeline()
+{
+    RenderCommand::waitForGraphicsQueueIdle();
+    RenderCommand::destroyGraphicsPipeline();
+    RenderCommand::createGraphicsPipeline();
+}
+
 SDL_AppResult Renderer::drawFrame()
 {
     auto window = reinterpret_cast<SDL_Window*>(RenderCommand::GetWindowHandle());

@@ -33,7 +33,7 @@ VulkanRendererAPI::VulkanRendererAPI(const Config& config) : m_windowSize({confi
     VK_CHECK(volkInitialize());
     // Create the GLTF Window
 #ifdef USE_SLANG
-  const char* windowTitle = "Minimal Latest (Slang)";
+    const char* windowTitle = "Minimal Latest (Slang)";
 #else
     const char* windowTitle = "Minimal Latest (GLSL)";
 #endif
@@ -201,6 +201,20 @@ void VulkanRendererAPI::init()
   * Destroy all resources and the Vulkan context
 -*/
 
+void VulkanRendererAPI::destroyGraphicsPipeline() const
+{
+    VkDevice device = m_context.getDevice();
+    
+    vkDestroyPipeline(device, m_graphicsPipelineWithTexture, nullptr);
+    vkDestroyPipeline(device, m_graphicsPipelineWithoutTexture, nullptr);
+    vkDestroyPipelineLayout(device, m_graphicPipelineLayout, nullptr);
+}
+
+void VulkanRendererAPI::waitForGraphicsQueueIdle()
+{
+    vkQueueWaitIdle(m_context.getGraphicsQueue().queue);
+}
+
 void VulkanRendererAPI::destroy()
 {
     VkDevice device = m_context.getDevice();
@@ -216,9 +230,7 @@ void VulkanRendererAPI::destroy()
     vkFreeDescriptorSets(device, m_descriptorPool, 1, &m_textureDescriptorSet);
 
     vkDestroyPipeline(device, m_computePipeline, nullptr);
-    vkDestroyPipeline(device, m_graphicsPipelineWithTexture, nullptr);
-    vkDestroyPipeline(device, m_graphicsPipelineWithoutTexture, nullptr);
-    vkDestroyPipelineLayout(device, m_graphicPipelineLayout, nullptr);
+    destroyGraphicsPipeline();
     vkDestroyPipelineLayout(device, m_computePipelineLayout, nullptr);
     vkDestroyCommandPool(device, m_transientCmdPool, nullptr);
     vkDestroySurfaceKHR(m_context.getInstance(), m_surface, nullptr);
@@ -358,7 +370,6 @@ void VulkanRendererAPI::createFrameSubmission(uint32_t numFrames)
 
 void VulkanRendererAPI::drawFrame()
 {
-   
 }
 
 /*---
@@ -416,16 +427,19 @@ VkCommandBuffer VulkanRendererAPI::beginFrame()
 //export
 // Define the opaque struct here *with* Vulkan details
 // Define the opaque struct here, wrapping the Vulkan command buffer
-struct VanKCommandBuffer_T {
+struct VanKCommandBuffer_T
+{
     VkCommandBuffer handle;
 };
 
-VkCommandBuffer Unwrap(VanKCommandBuffer cmd) {
+VkCommandBuffer Unwrap(VanKCommandBuffer cmd)
+{
     return cmd ? cmd->handle : VK_NULL_HANDLE;
 }
 
-VanKCommandBuffer VulkanRendererAPI::BeginCommandBuffer() {
-    VkCommandBuffer vkCmd = beginFrame();  // your existing Vulkan call
+VanKCommandBuffer VulkanRendererAPI::BeginCommandBuffer()
+{
+    VkCommandBuffer vkCmd = beginFrame(); // your existing Vulkan call
     if (vkCmd == VK_NULL_HANDLE)
         return nullptr;
 
@@ -526,10 +540,10 @@ void VulkanRendererAPI::endFrame(VanKCommandBuffer cmd)
    * This happens when the window is resized, or when the ImGui viewport window is resized.
   -*/
 
-void VulkanRendererAPI::OnViewportSizeChange( const Extent2D& size)
+void VulkanRendererAPI::OnViewportSizeChange(const Extent2D& size)
 {
-    VkExtent2D vkSize = { size.width, size.height };
-    
+    VkExtent2D vkSize = {size.width, size.height};
+
     m_viewportSize = vkSize;
     // Recreate the G-Buffer to the size of the viewport
     vkQueueWaitIdle(m_context.getGraphicsQueue().queue);
@@ -813,18 +827,185 @@ void VulkanRendererAPI::recordGraphicCommands(VanKCommandBuffer cmd)
    * The graphic pipeline is all the stages that are used to render a section of the scene.
    * Stages like: vertex shader, fragment shader, rasterization, and blending.
   -*/
+std::string loadFileContents(const std::string& path)
+{
+    std::ifstream file(path);
+    if (!file)
+    {
+        throw std::runtime_error("Failed to open file: " + path);
+    }
+
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    return buffer.str();
+}
+
+void diagnoseIfNeeded(slang::IBlob* diagnosticsBlob, std::string& outDiagnostics)
+{
+    if (diagnosticsBlob)
+    {
+        const char* diagStr = static_cast<const char*>(diagnosticsBlob->getBufferPointer());
+        std::cout << diagStr << '\n';
+        outDiagnostics += diagStr;
+    }
+}
+
+CompileResult compileSlangToSpirv(
+    const std::string& moduleName,
+    const std::string& filePath,
+    const std::string& sourceCode,
+    const std::string& entryPointName)
+{
+    CompileResult result;
+
+    Slang::ComPtr<slang::IGlobalSession> globalSession;
+    SlangResult res = createGlobalSession(globalSession.writeRef());
+    if (SLANG_FAILED(res))
+    {
+        result.diagnostics = "Failed to create global session.";
+        return result;
+    }
+
+    slang::SessionDesc sessionDesc = {};
+    slang::TargetDesc targetDesc = {};
+    targetDesc.format = SLANG_SPIRV;
+    targetDesc.profile = globalSession->findProfile("spirv_1_5");
+
+    sessionDesc.targets = &targetDesc;
+    sessionDesc.targetCount = 1;
+
+    // Prepare persistent string for search path
+    static const std::string shaderDir = "../../shaders"; // 🔁 Make sure this lives long enough
+    const char* searchPaths[] = {shaderDir.c_str()};
+
+    sessionDesc.searchPaths = searchPaths;
+    sessionDesc.searchPathCount = 1;
+
+    slang::CompilerOptionEntry option = {
+        slang::CompilerOptionName::EmitSpirvDirectly,
+        {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
+    };
+
+    sessionDesc.compilerOptionEntries = &option;
+    sessionDesc.compilerOptionEntryCount = 1;
+
+    Slang::ComPtr<slang::ISession> session;
+    res = globalSession->createSession(sessionDesc, session.writeRef());
+    if (SLANG_FAILED(res))
+    {
+        result.diagnostics = "Failed to create session.";
+        return result;
+    }
+
+    // Load module
+    Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+    Slang::ComPtr<slang::IModule> slangModule;
+    slangModule = session->loadModuleFromSourceString(
+        moduleName.c_str(),
+        filePath.c_str(),
+        sourceCode.c_str(),
+        diagnosticsBlob.writeRef());
+    diagnoseIfNeeded(diagnosticsBlob, result.diagnostics);
+
+    if (!slangModule)
+    {
+        if (result.diagnostics.empty())
+            result.diagnostics = "Failed to load module.";
+        return result;
+    }
+
+    // Find entry point
+    Slang::ComPtr<slang::IEntryPoint> entryPoint;
+    res = slangModule->findEntryPointByName(entryPointName.c_str(), entryPoint.writeRef());
+    if (SLANG_FAILED(res) || !entryPoint)
+    {
+        result.diagnostics += "\nFailed to find entry point: " + entryPointName;
+        return result;
+    }
+
+    // Compose components
+    std::array<slang::IComponentType*, 2> componentTypes = {slangModule, entryPoint};
+    Slang::ComPtr<slang::IComponentType> composedProgram;
+    res = session->createCompositeComponentType(
+        componentTypes.data(),
+        componentTypes.size(),
+        composedProgram.writeRef(),
+        diagnosticsBlob.writeRef());
+    diagnoseIfNeeded(diagnosticsBlob, result.diagnostics);
+    if (SLANG_FAILED(res))
+        return result;
+
+    // Link program
+    Slang::ComPtr<slang::IComponentType> linkedProgram;
+    res = composedProgram->link(linkedProgram.writeRef(), diagnosticsBlob.writeRef());
+    diagnoseIfNeeded(diagnosticsBlob, result.diagnostics);
+    if (SLANG_FAILED(res))
+        return result;
+
+    // Get SPIR-V code
+    Slang::ComPtr<slang::IBlob> spirvCodeBlob;
+    res = linkedProgram->getEntryPointCode(0, 0, spirvCodeBlob.writeRef(), diagnosticsBlob.writeRef());
+    diagnoseIfNeeded(diagnosticsBlob, result.diagnostics);
+    if (SLANG_FAILED(res))
+        return result;
+
+    size_t wordCount = spirvCodeBlob->getBufferSize() / sizeof(uint32_t);
+    const uint32_t* code = reinterpret_cast<const uint32_t*>(spirvCodeBlob->getBufferPointer());
+    result.spirvCode.assign(code, code + wordCount);
+
+    result.succeeded = true;
+    return result;
+}
 
 void VulkanRendererAPI::createGraphicsPipeline()
 {
+    const std::vector<std::string> searchPaths = {".", "shaders", "../shaders", "../../shaders"};
+    
+    // Load and compile vertex shader
+    std::string vertFilename = utils::findFile("shader.rast.slang", searchPaths);
+    std::string vertexShaderSource = loadFileContents(vertFilename.c_str());
+    std::cout << "Vertex Shader file: " << vertFilename << std::endl;
+
+    auto vertResult = compileSlangToSpirv("vertexModule", vertFilename, vertexShaderSource, {"vertexMain"});
+    if (!vertResult.succeeded)
+    {
+        std::cerr << "Vertex shader compile error:\n" << vertResult.diagnostics << "\n";
+        return; // Handle error
+    }
+
+    // Load and compile fragment shader
+    std::string fragFilename = utils::findFile("shader.rast.slang", searchPaths);
+    std::string fragmentShaderSource = loadFileContents(fragFilename.c_str());
+    std::cout << "Fragment Shader file: " << fragFilename << std::endl;
+
+    auto fragResult = compileSlangToSpirv("fragmentModule", fragFilename, fragmentShaderSource, {"fragmentMain"});
+    if (!fragResult.succeeded)
+    {
+        std::cerr << "Fragment shader compile error:\n" << fragResult.diagnostics << "\n";
+        return; // Handle error
+    }
+
+    if (vertResult.spirvCode.empty()) {
+        std::cerr << "Vertex shader SPIR-V is empty!\n";
+        // handle error
+    }
+    if (fragResult.spirvCode.empty()) {
+        std::cerr << "Fragment shader SPIR-V is empty!\n";
+        // handle error
+    }
+
     // Spir-V to shader modules
 #ifdef USE_SLANG
-    const char* vertEntryName = "vertexMain";
-    const char* fragEntryName = "fragmentMain";
+    const char* vertEntryName = "main";
+    const char* fragEntryName = "main";
 
-    VkShaderModule vertShaderModule =
-        utils::createShaderModule(m_context.getDevice(), {shader_rast_slang, std::size(shader_rast_slang)});
+   // Convert SPIR-V to Vulkan shader modules
+    VkShaderModule vertShaderModule = utils::createShaderModule(
+        m_context.getDevice(), vertResult.spirvCode);
     DBG_VK_NAME(vertShaderModule);
-    VkShaderModule fragShaderModule = vertShaderModule;
+    VkShaderModule fragShaderModule = utils::createShaderModule(
+        m_context.getDevice(), fragResult.spirvCode);
+    DBG_VK_NAME(fragShaderModule);
 #else
     const char* vertEntryName = "main";
     const char* fragEntryName = "main";
@@ -1040,6 +1221,7 @@ void VulkanRendererAPI::createGraphicsPipeline()
 
     // Clean up the shader modules
     vkDestroyShaderModule(m_context.getDevice(), vertShaderModule, nullptr);
+    vkDestroyShaderModule(m_context.getDevice(), fragShaderModule, nullptr);
 #ifndef USE_SLANG
     vkDestroyShaderModule(m_context.getDevice(), fragShaderModule, nullptr);
 #endif  // USE_SLANG
@@ -1089,27 +1271,27 @@ void VulkanRendererAPI::BlitGBufferToSwapchain(VanKCommandBuffer cmd)
 {
     // --- Transition swapchain image to VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL ---
     utils::cmdTransitionImageLayout(
-      Unwrap(cmd),
-      m_swapchain.getNextImage(),
-      VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+        Unwrap(cmd),
+        m_swapchain.getNextImage(),
+        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
     );
 
     // --- Transition GBuffer image to VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL ---
     utils::cmdTransitionImageLayout(
-      Unwrap(cmd),
-      m_gBuffer.getColorImage(),
-      VK_IMAGE_LAYOUT_GENERAL,
-      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+        Unwrap(cmd),
+        m_gBuffer.getColorImage(),
+        VK_IMAGE_LAYOUT_GENERAL,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
     );
 
     // --- Blit ---
     VkImageBlit2 blitRegion{
         .sType = VK_STRUCTURE_TYPE_IMAGE_BLIT_2,
-        .srcSubresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .layerCount = 1 },
-        .srcOffsets = { {0, 0, 0}, {int32_t(m_viewportSize.width), int32_t(m_viewportSize.height), 1} },
-        .dstSubresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .layerCount = 1 },
-        .dstOffsets = { {0, 0, 0}, {int32_t(m_windowSize.width), int32_t(m_windowSize.height), 1} }
+        .srcSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .layerCount = 1},
+        .srcOffsets = {{0, 0, 0}, {int32_t(m_viewportSize.width), int32_t(m_viewportSize.height), 1}},
+        .dstSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .layerCount = 1},
+        .dstOffsets = {{0, 0, 0}, {int32_t(m_windowSize.width), int32_t(m_windowSize.height), 1}}
     };
     VkBlitImageInfo2 blitInfo{
         .sType = VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2,
@@ -1120,21 +1302,21 @@ void VulkanRendererAPI::BlitGBufferToSwapchain(VanKCommandBuffer cmd)
         .regionCount = 1,
         .pRegions = &blitRegion,
         .filter = VK_FILTER_NEAREST
-      };
+    };
     vkCmdBlitImage2(Unwrap(cmd), &blitInfo);
 
     // --- Transition images back to their original layouts ---
     utils::cmdTransitionImageLayout(
-      Unwrap(cmd),
-      m_swapchain.getNextImage(),
-      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-      VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
+        Unwrap(cmd),
+        m_swapchain.getNextImage(),
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
     );
     utils::cmdTransitionImageLayout(
-      Unwrap(cmd),
-      m_gBuffer.getColorImage(),
-      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-      VK_IMAGE_LAYOUT_GENERAL
+        Unwrap(cmd),
+        m_gBuffer.getColorImage(),
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        VK_IMAGE_LAYOUT_GENERAL
     );
 }
 
@@ -1402,7 +1584,9 @@ void VulkanRendererAPI::createComputeShaderPipeline()
 
     // Creating the pipeline to run the compute shader
 #ifdef USE_SLANG
-    VkShaderModule compute = utils::createShaderModule(m_context.getDevice(), {shader_comp_slang, std::size(shader_comp_slang)});
+    VkShaderModule compute = utils::createShaderModule(m_context.getDevice(), {
+                                                           shader_comp_slang, std::size(shader_comp_slang)
+                                                       });
 #else
     VkShaderModule compute = utils::createShaderModule(m_context.getDevice(), {
                                                            shader_comp_glsl, std::size(shader_comp_glsl)
