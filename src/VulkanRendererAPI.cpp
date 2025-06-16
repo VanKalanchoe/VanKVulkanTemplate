@@ -870,113 +870,6 @@ void diagnoseIfNeeded(slang::IBlob* diagnosticsBlob, std::string& outDiagnostics
     }
 }
 
-CompileResult compileSlangToSpirv(
-    const std::string& moduleName,
-    const std::string& filePath,
-    const std::string& sourceCode,
-    const std::string& entryPointName)
-{
-    CompileResult result;
-
-    Slang::ComPtr<slang::IGlobalSession> globalSession;
-    SlangResult res = createGlobalSession(globalSession.writeRef());
-    if (SLANG_FAILED(res))
-    {
-        result.diagnostics = "Failed to create global session.";
-        return result;
-    }
-
-    slang::SessionDesc sessionDesc = {};
-    slang::TargetDesc targetDesc = {};
-    targetDesc.format = SLANG_SPIRV;
-    targetDesc.profile = globalSession->findProfile("spirv_1_5");
-
-    sessionDesc.targets = &targetDesc;
-    sessionDesc.targetCount = 1;
-
-    // Prepare persistent string for search path
-    static const std::string shaderDir = "../../shaders"; // 🔁 Make sure this lives long enough
-    const char* searchPaths[] = {shaderDir.c_str()};
-
-    sessionDesc.searchPaths = searchPaths;
-    sessionDesc.searchPathCount = 1;
-
-    slang::CompilerOptionEntry option = {
-        slang::CompilerOptionName::EmitSpirvDirectly,
-        {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
-    };
-
-    sessionDesc.compilerOptionEntries = &option;
-    sessionDesc.compilerOptionEntryCount = 1;
-
-    Slang::ComPtr<slang::ISession> session;
-    res = globalSession->createSession(sessionDesc, session.writeRef());
-    if (SLANG_FAILED(res))
-    {
-        result.diagnostics = "Failed to create session.";
-        return result;
-    }
-
-    // Load module
-    Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-    Slang::ComPtr<slang::IModule> slangModule;
-    slangModule = session->loadModuleFromSourceString(
-        moduleName.c_str(),
-        filePath.c_str(),
-        sourceCode.c_str(),
-        diagnosticsBlob.writeRef());
-    diagnoseIfNeeded(diagnosticsBlob, result.diagnostics);
-
-    if (!slangModule)
-    {
-        if (result.diagnostics.empty())
-            result.diagnostics = "Failed to load module.";
-        return result;
-    }
-
-    // Find entry point
-    Slang::ComPtr<slang::IEntryPoint> entryPoint;
-    res = slangModule->findEntryPointByName(entryPointName.c_str(), entryPoint.writeRef());
-    if (SLANG_FAILED(res) || !entryPoint)
-    {
-        result.diagnostics += "\nFailed to find entry point: " + entryPointName;
-        return result;
-    }
-
-    // Compose components
-    std::array<slang::IComponentType*, 2> componentTypes = {slangModule, entryPoint};
-    Slang::ComPtr<slang::IComponentType> composedProgram;
-    res = session->createCompositeComponentType(
-        componentTypes.data(),
-        componentTypes.size(),
-        composedProgram.writeRef(),
-        diagnosticsBlob.writeRef());
-    diagnoseIfNeeded(diagnosticsBlob, result.diagnostics);
-    if (SLANG_FAILED(res))
-        return result;
-
-    // Link program
-    Slang::ComPtr<slang::IComponentType> linkedProgram;
-    res = composedProgram->link(linkedProgram.writeRef(), diagnosticsBlob.writeRef());
-    diagnoseIfNeeded(diagnosticsBlob, result.diagnostics);
-    if (SLANG_FAILED(res))
-        return result;
-
-    // Get SPIR-V code
-    Slang::ComPtr<slang::IBlob> spirvCodeBlob;
-    res = linkedProgram->getEntryPointCode(0, 0, spirvCodeBlob.writeRef(), diagnosticsBlob.writeRef());
-    diagnoseIfNeeded(diagnosticsBlob, result.diagnostics);
-    if (SLANG_FAILED(res))
-        return result;
-
-    size_t wordCount = spirvCodeBlob->getBufferSize() / sizeof(uint32_t);
-    const uint32_t* code = reinterpret_cast<const uint32_t*>(spirvCodeBlob->getBufferPointer());
-    result.spirvCode.assign(code, code + wordCount);
-
-    result.succeeded = true;
-    return result;
-}
-
 CompileResult compileGlslToSpirv(
     const std::string& sourceName,
     const std::string& sourceCode,
@@ -1043,6 +936,184 @@ std::string getCachedShaderPath(const std::string& filename)
     return path.string(); // Return full path as std::string
 }
 
+// New struct for multi-entry point result
+struct CompileResultMulti
+{
+    std::unordered_map<std::string, std::vector<uint32_t>> spirvMap;
+    std::string diagnostics;
+    bool succeeded = false;
+};
+
+// New multi-entry Slang compile function
+CompileResultMulti compileSlangToSpirvMultiple(
+    const std::string& moduleName,
+    const std::string& filePath,
+    const std::string& sourceCode,
+    const std::vector<std::string>& entryPointNames)
+{
+    CompileResultMulti result;
+    // create globalSession, session etc same as compileSlangToSpirv...
+
+    Slang::ComPtr<slang::IGlobalSession> globalSession;
+    if (SLANG_FAILED(createGlobalSession(globalSession.writeRef())))
+    {
+        result.diagnostics = "Failed to create global session.";
+        return result;
+    }
+
+    slang::SessionDesc sessionDesc = {};
+    slang::TargetDesc targetDesc = {};
+    targetDesc.format = SLANG_SPIRV;
+    targetDesc.profile = globalSession->findProfile("spirv_1_5");
+
+    sessionDesc.targets = &targetDesc;
+    sessionDesc.targetCount = 1;
+
+    static const std::string shaderDir = "../../shaders";
+    const char* searchPaths[] = { shaderDir.c_str() };
+    sessionDesc.searchPaths = searchPaths;
+    sessionDesc.searchPathCount = 1;
+
+    slang::CompilerOptionEntry option = {
+        slang::CompilerOptionName::EmitSpirvDirectly,
+        {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
+    };
+    sessionDesc.compilerOptionEntries = &option;
+    sessionDesc.compilerOptionEntryCount = 1;
+
+    Slang::ComPtr<slang::ISession> session;
+    if (SLANG_FAILED(globalSession->createSession(sessionDesc, session.writeRef())))
+    {
+        result.diagnostics = "Failed to create session.";
+        return result;
+    }
+
+    Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+    Slang::ComPtr<slang::IModule> slangModule;
+    slangModule = session->loadModuleFromSourceString(
+        moduleName.c_str(), filePath.c_str(), sourceCode.c_str(), diagnosticsBlob.writeRef());
+    if (diagnosticsBlob) result.diagnostics += static_cast<const char*>(diagnosticsBlob->getBufferPointer());
+
+    if (!slangModule)
+    {
+        if (result.diagnostics.empty()) result.diagnostics = "Failed to load module.";
+        return result;
+    }
+
+    for (auto const& entryPointName : entryPointNames)
+    {
+        Slang::ComPtr<slang::IEntryPoint> entryPoint;
+        if (SLANG_FAILED(slangModule->findEntryPointByName(entryPointName.c_str(), entryPoint.writeRef())) || !entryPoint)
+        {
+            result.diagnostics += "\nFailed to find entry point: " + entryPointName;
+            continue;
+        }
+
+        std::array<slang::IComponentType*, 2> components = { slangModule.get(), entryPoint.get() };
+        Slang::ComPtr<slang::IComponentType> composite;
+        if (SLANG_FAILED(session->createCompositeComponentType(components.data(), components.size(), composite.writeRef(), diagnosticsBlob.writeRef())))
+        {
+            if (diagnosticsBlob) result.diagnostics += static_cast<const char*>(diagnosticsBlob->getBufferPointer());
+            continue;
+        }
+
+        Slang::ComPtr<slang::IComponentType> linkedProgram;
+        if (SLANG_FAILED(composite->link(linkedProgram.writeRef(), diagnosticsBlob.writeRef())))
+        {
+            if (diagnosticsBlob) result.diagnostics += static_cast<const char*>(diagnosticsBlob->getBufferPointer());
+            continue;
+        }
+
+        Slang::ComPtr<slang::IBlob> spirvBlob;
+        if (SLANG_FAILED(linkedProgram->getEntryPointCode(0, 0, spirvBlob.writeRef(), diagnosticsBlob.writeRef())))
+        {
+            if (diagnosticsBlob) result.diagnostics += static_cast<const char*>(diagnosticsBlob->getBufferPointer());
+            continue;
+        }
+
+        size_t wordCount = spirvBlob->getBufferSize() / sizeof(uint32_t);
+        const uint32_t* code = reinterpret_cast<const uint32_t*>(spirvBlob->getBufferPointer());
+        result.spirvMap[entryPointName] = std::vector<uint32_t>(code, code + wordCount);
+    }
+
+    result.succeeded = !result.spirvMap.empty();
+    return result;
+}
+
+// New load function for Slang multi-entry points, returns map of entry point → spirv
+std::unordered_map<std::string, std::vector<uint32_t>> loadOrCompileShadersSlang(
+    const std::string& moduleName,
+    const std::string& sourcePath,
+    const std::vector<std::string>& entryPoints,
+    const std::unordered_map<std::string, std::string>& cacheFilenames)
+{
+    std::string sourceCode;
+    try
+    {
+        sourceCode = loadFileContents(sourcePath);
+    }
+    catch (const std::exception& e)
+    {
+        throw std::runtime_error("Failed to load shader source file '" + sourcePath + "': " + e.what());
+    }
+
+    CompileResultMulti result = compileSlangToSpirvMultiple(moduleName, sourcePath, sourceCode, entryPoints);
+
+    if (!result.succeeded)
+    {
+        std::cerr << "Slang shader compilation failed for module '" << moduleName << "':\n"
+                  << result.diagnostics << "\n";
+
+        // Attempt fallback: load cached SPIR-V for all entry points
+        std::unordered_map<std::string, std::vector<uint32_t>> fallbackSpv;
+        bool fallbackSucceeded = true;
+
+        for (const auto& [entry, cacheFile] : cacheFilenames)
+        {
+            std::vector<uint32_t> cachedSpv = loadSpirvFromFile(getCachedShaderPath(cacheFile));
+            if (cachedSpv.empty())
+            {
+                std::cerr << "Fallback SPIR-V cache for entry point '" << entry << "' is empty or missing at: "
+                          << cacheFile << "\n";
+                fallbackSucceeded = false;
+                break;
+            }
+            fallbackSpv[entry] = std::move(cachedSpv);
+        }
+
+        if (!fallbackSucceeded)
+        {
+            throw std::runtime_error("Shader compilation failed and fallback SPIR-V cache is missing or invalid for module '" + moduleName + "'");
+        }
+
+        return fallbackSpv;
+    }
+
+    // Compilation succeeded: save all compiled entry points and return
+    std::unordered_map<std::string, std::vector<uint32_t>> spirvOutputs;
+    for (const auto& [entry, spirv] : result.spirvMap)
+    {
+        try
+        {
+            saveSpirvToFile(getCachedShaderPath(cacheFilenames.at(entry)), spirv);
+        }
+        catch (const std::exception& e)
+        {
+            std::cerr << "Warning: Failed to save SPIR-V cache for entry point '" << entry << "': " << e.what() << "\n";
+        }
+        spirvOutputs[entry] = spirv;
+    }
+
+    // Optionally log warnings/diagnostics even if succeeded
+    if (!result.diagnostics.empty())
+    {
+        std::cout << "Slang diagnostics for module '" << moduleName << "':\n" << result.diagnostics << "\n";
+    }
+
+    return spirvOutputs;
+}
+
+
 std::vector<uint32_t> loadOrCompileShader(
     const std::string& moduleName,
     const std::string& sourcePath,
@@ -1050,13 +1121,10 @@ std::vector<uint32_t> loadOrCompileShader(
     const std::string& cacheFilename)
 {
     std::string sourceCode = loadFileContents(sourcePath);
-#ifdef USE_SLANG
-    CompileResult result = compileSlangToSpirv(moduleName, sourcePath, sourceCode, entryPoint);
-    std::cout << "Compiled with Slang" << '\n';
-#else
+
     CompileResult result = compileGlslToSpirv(moduleName, sourceCode, sourcePath);
     std::cout << "Compiled with Shaderc vert frag" << '\n';
-#endif
+
 
     const std::string cachePath = getCachedShaderPath(cacheFilename);
 
@@ -1086,9 +1154,17 @@ void VulkanRendererAPI::createGraphicsPipeline()
     std::string shaderFile = utils::findFile("shader.rast.slang", searchPaths);
     std::cout << "Shader file: " << shaderFile << '\n';
 
-    // Load and compile vertex shader
-    std::vector<uint32_t> vertSpv = loadOrCompileShader("vertexModule", shaderFile, "vertexMain", "vertex.spv");
-    std::vector<uint32_t> fragSpv = loadOrCompileShader("fragmentModule", shaderFile, "fragmentMain", "fragment.spv");
+    std::unordered_map<std::string, std::string> cacheFiles = {
+        {"vertexMain", "vertex.spv"},
+        {"fragmentMain", "fragment.spv"}
+    };
+
+    std::vector<std::string> entryPoints = {"vertexMain", "fragmentMain"};
+    
+    auto spirvShaders = loadOrCompileShadersSlang("shaderModule", shaderFile, entryPoints, cacheFiles);
+    
+    std::vector<uint32_t> vertSpv = spirvShaders["vertexMain"];
+    std::vector<uint32_t> fragSpv = spirvShaders["fragmentMain"];
 #else
     std::string vertShaderFile = utils::findFile("shader.vert.glsl", searchPaths);
     std::cout << "Shader file: " << vertShaderFile << '\n';
