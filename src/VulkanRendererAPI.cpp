@@ -204,7 +204,7 @@ void VulkanRendererAPI::init()
 void VulkanRendererAPI::destroyGraphicsPipeline() const
 {
     VkDevice device = m_context.getDevice();
-    
+
     vkDestroyPipeline(device, m_graphicsPipelineWithTexture, nullptr);
     vkDestroyPipeline(device, m_graphicsPipelineWithoutTexture, nullptr);
     vkDestroyPipelineLayout(device, m_graphicPipelineLayout, nullptr);
@@ -837,7 +837,27 @@ std::string loadFileContents(const std::string& path)
 
     std::stringstream buffer;
     buffer << file.rdbuf();
+    file.close();
     return buffer.str();
+}
+
+bool saveSpirvToFile(const std::string& filename, const std::vector<uint32_t>& spirv)
+{
+    std::ofstream file(filename, std::ios::binary);
+    if (!file) return false;
+    file.write(reinterpret_cast<const char*>(spirv.data()), spirv.size() * sizeof(uint32_t));
+    return true;
+}
+
+std::vector<uint32_t> loadSpirvFromFile(const std::string& filename)
+{
+    std::ifstream file(filename, std::ios::binary | std::ios::ate);
+    if (!file) return {};
+    std::streamsize size = file.tellg();
+    file.seekg(0, std::ios::beg);
+    std::vector<uint32_t> buffer(size / sizeof(uint32_t));
+    if (!file.read(reinterpret_cast<char*>(buffer.data()), size)) return {};
+    return buffer;
 }
 
 void diagnoseIfNeeded(slang::IBlob* diagnosticsBlob, std::string& outDiagnostics)
@@ -956,55 +976,76 @@ CompileResult compileSlangToSpirv(
     result.succeeded = true;
     return result;
 }
+#include <SDL3/SDL_filesystem.h>
+std::string getCachedShaderPath(const std::string& filename)
+{
+    const char* basePath = SDL_GetBasePath();
+    if (!basePath)
+    {
+        throw std::runtime_error("Failed to get base path: " + std::string(SDL_GetError()));
+    }
+
+    std::filesystem::path path(basePath);
+
+    path /= "cache";                         // Append 'cache' directory
+    std::filesystem::create_directories(path); // Ensure it exists
+    path /= filename;                        // Append the actual filename
+
+    return path.string();                    // Return full path as std::string
+}
+
+std::vector<uint32_t> loadOrCompileShader(
+    const std::string& moduleName,
+    const std::string& sourcePath,
+    const std::string& entryPoint,
+    const std::string& cacheFilename)
+{
+    std::string sourceCode = loadFileContents(sourcePath);
+    CompileResult result = compileSlangToSpirv(moduleName, sourcePath, sourceCode, entryPoint);
+
+    const std::string cachePath = getCachedShaderPath(cacheFilename);
+
+    if (result.succeeded)
+    {
+        saveSpirvToFile(cachePath, result.spirvCode);
+        return result.spirvCode;
+    }
+
+    std::cerr << "Shader compile failed for " << moduleName << ":\n" << result.diagnostics;
+    std::cerr << "Attempting to load cached SPIR-V from: " << cachePath << "\n";
+
+    std::vector<uint32_t> cachedSpv = loadSpirvFromFile(cachePath);
+    if (cachedSpv.empty())
+    {
+        throw std::runtime_error("Fallback SPIR-V cache for '" + moduleName + "' is empty or missing.");
+    }
+
+    return cachedSpv;
+}
 
 void VulkanRendererAPI::createGraphicsPipeline()
 {
     const std::vector<std::string> searchPaths = {".", "shaders", "../shaders", "../../shaders"};
     
+#ifdef USE_SLANG
+    std::string shaderFile = utils::findFile("shader.rast.slang", searchPaths);
+    std::cout << "Shader file: " << shaderFile << '\n';
+
     // Load and compile vertex shader
-    std::string vertFilename = utils::findFile("shader.rast.slang", searchPaths);
-    std::string vertexShaderSource = loadFileContents(vertFilename.c_str());
-    std::cout << "Vertex Shader file: " << vertFilename << std::endl;
-
-    auto vertResult = compileSlangToSpirv("vertexModule", vertFilename, vertexShaderSource, {"vertexMain"});
-    if (!vertResult.succeeded)
-    {
-        std::cerr << "Vertex shader compile error:\n" << vertResult.diagnostics << "\n";
-        return; // Handle error
-    }
-
-    // Load and compile fragment shader
-    std::string fragFilename = utils::findFile("shader.rast.slang", searchPaths);
-    std::string fragmentShaderSource = loadFileContents(fragFilename.c_str());
-    std::cout << "Fragment Shader file: " << fragFilename << std::endl;
-
-    auto fragResult = compileSlangToSpirv("fragmentModule", fragFilename, fragmentShaderSource, {"fragmentMain"});
-    if (!fragResult.succeeded)
-    {
-        std::cerr << "Fragment shader compile error:\n" << fragResult.diagnostics << "\n";
-        return; // Handle error
-    }
-
-    if (vertResult.spirvCode.empty()) {
-        std::cerr << "Vertex shader SPIR-V is empty!\n";
-        // handle error
-    }
-    if (fragResult.spirvCode.empty()) {
-        std::cerr << "Fragment shader SPIR-V is empty!\n";
-        // handle error
-    }
+    std::vector<uint32_t> vertSpv = loadOrCompileShader("vertexModule", shaderFile, "vertexMain", "vertex.spv");
+    std::vector<uint32_t> fragSpv = loadOrCompileShader("fragmentModule", shaderFile, "fragmentMain", "fragment.spv");
 
     // Spir-V to shader modules
-#ifdef USE_SLANG
+
     const char* vertEntryName = "main";
     const char* fragEntryName = "main";
 
-   // Convert SPIR-V to Vulkan shader modules
+    // Convert SPIR-V to Vulkan shader modules
     VkShaderModule vertShaderModule = utils::createShaderModule(
-        m_context.getDevice(), vertResult.spirvCode);
+        m_context.getDevice(), vertSpv);
     DBG_VK_NAME(vertShaderModule);
     VkShaderModule fragShaderModule = utils::createShaderModule(
-        m_context.getDevice(), fragResult.spirvCode);
+        m_context.getDevice(), fragSpv);
     DBG_VK_NAME(fragShaderModule);
 #else
     const char* vertEntryName = "main";
