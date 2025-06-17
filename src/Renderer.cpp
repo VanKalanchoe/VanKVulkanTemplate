@@ -7,6 +7,8 @@
 #include <SDL3/SDL_timer.h>
 
 #include "imgui.h"
+#include "Texture.h"
+#include "VulkanRendererAPI.h"
 #include "backends/imgui_impl_sdl3.h"
 #include "backends/imgui_impl_vulkan.h"
 
@@ -14,6 +16,10 @@ bool Renderer::m_useImGui = true;           // initialize to default false
 bool Renderer::m_windowResized = false;
 Extent2D Renderer::lastViewportSize = {0,0}; // initialize as needed
 
+std::shared_ptr<Texture2D> m_texture = nullptr;
+std::shared_ptr<Texture2D> m_texture2 = nullptr;
+std::shared_ptr<Texture2D> m_texture3 = nullptr;
+std::shared_ptr<Texture2D> m_texture4 = nullptr;
 void Renderer::initRenderer()
 {
     RendererAPI::Config config;
@@ -22,6 +28,13 @@ void Renderer::initRenderer()
 
     RenderCommand::SetConfig(config);  // Provide config to RenderCommand
     RenderCommand::Init();             // RenderCommand creates and initializes RendererAPI instance
+
+    SDL_SetWindowMinimumSize(static_cast<SDL_Window*>(RenderCommand::GetWindowHandle()),640,480);
+    
+    m_texture = Texture2D::Create("image1.jpg");
+    m_texture2 = Texture2D::Create("image2.jpg");
+    m_texture3 = Texture2D::Create("ChernoLogo.png");
+    m_texture4 = Texture2D::Create("char2.png");
 }
 
 void Renderer::useImGui()
@@ -52,6 +65,7 @@ void Renderer::reloadGraphicsPipeline()
 
 SDL_AppResult Renderer::drawFrame()
 {
+   
     auto window = reinterpret_cast<SDL_Window*>(RenderCommand::GetWindowHandle());
     if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED)
     {
@@ -146,11 +160,19 @@ SDL_AppResult Renderer::drawFrame()
             
             if (ImGui::RadioButton("Image 1", imageID == 0))
             {
-                RenderCommand::SetImageID(0);
+                RenderCommand::SetImageID(m_texture->GetTextureIndex());
             }
             if (ImGui::RadioButton("Image 2", imageID == 1))
             {
-                RenderCommand::SetImageID(1);
+                RenderCommand::SetImageID(m_texture2->GetTextureIndex());
+            }
+            if (ImGui::RadioButton("Image 3", imageID == 2))
+            {
+                RenderCommand::SetImageID(m_texture3->GetTextureIndex());
+            }
+            if (ImGui::RadioButton("Image 4", imageID == 3))
+            {
+                RenderCommand::SetImageID(m_texture4->GetTextureIndex());
             }
             
             ImGui::Checkbox("Use ImGui", &m_useImGui);
@@ -175,7 +197,7 @@ SDL_AppResult Renderer::drawFrame()
 
     RenderCommand::endFrame(cmd);
     //std::cout << RenderCommand::downloadColorAttachmentEntityID()[10] << '\n';
-
+    
     //endFream______
 
     // Update and Render additional Platform Windows (floating windows)

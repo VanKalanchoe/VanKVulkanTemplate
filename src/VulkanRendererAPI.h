@@ -198,6 +198,17 @@ static const auto s_indices = std::to_array<uint32_t>({
     3, 4, 5 // Second triangle (textured)
 });
 
+/*
+{{-0.4F, -0.4F, 0.75F}, {0.3F, 0.3F, 0.3F}, {0.0F, 1.0F}}, // 3
+{{-0.4F,  0.6F, 0.75F}, {1.0F, 1.0F, 1.0F}, {0.0F, 0.0F}}, // 4
+{{ 0.6F,  0.6F, 0.75F}, {0.7F, 0.7F, 0.7F}, {1.0F, 0.0F}}, // 5
+{{ 0.6F, -0.4F, 0.75F}, {0.7F, 0.7F, 0.7F}, {1.0F, 1.0F}}, // 6
+*/
+
+/*0, 1, 2, // First triangle (colored)
+    3, 4, 5, // Second triangle (textured)
+    3, 5, 6*/
+
 // Points stored in a buffer and retrieved using buffer reference (flashing points)
 static const auto s_points = std::to_array<glm::vec2>({{0.05F, 0.0F}, {-0.05F, 0.0F}, {0.0F, -0.05F}, {0.0F, 0.05F}});
 
@@ -2171,8 +2182,23 @@ public:
         m_imageID = id;
     }
 
-    //expose variable end-------
+    uint32_t AddTextureToPool(utils::ImageResource&& imageResource);
+    void RemoveTextureFromPool(uint32_t index);
+    void ResizeDescriptor();
+    uint32_t GetTextureCount() const { return static_cast<uint32_t>(m_image.size()); }
+    uint32_t GetMaxTexture() const { return m_maxTextures; }
+    bool IsTextureValid(uint32_t index) const { return index < m_image.size(); }
+    bool IsInitialized() const { return s_instance != nullptr; }
 
+    static VulkanRendererAPI& Get();
+
+    utils::Context& GetContext() { return m_context; }
+    VkCommandPool& GetTransientCmdPool() { return m_transientCmdPool; }
+    utils::ResourceAllocator& GetAllocator() { return m_allocator; }
+    static VulkanRendererAPI* s_instance;
+    static void SetInstance(VulkanRendererAPI* rendererAPI);
+
+    //expose variable end-------
 
 private:
     /*--
@@ -2361,28 +2387,23 @@ private:
     void unmapDownloadedData();
 
     //--------------------------------------------------------------------------------------------------
-public:
-    SDL_Window* m_window{}; // The window
 private:
+    SDL_Window* m_window{}; // The window
     utils::Context m_context; // The Vulkan context
     utils::ResourceAllocator m_allocator; // The VMA allocator
-public:
     utils::Swapchain m_swapchain; // The swapchain
-private:
     utils::Buffer m_vertexBuffer; // The vertex buffer (two triangles) (SSBO)
     utils::Buffer m_pointsBuffer; // The data buffer (SSBO)
     utils::Buffer m_sceneInfoBuffer; // The buffer used to pass data to the shader (UBO)
     utils::Buffer m_indexBuffer; // The index buffer for indexed rendering
-    utils::ImageResource m_image[2]; // The loaded image
+    std::vector<utils::ImageResource> m_image; // The loaded image
     utils::SamplerPool m_samplerPool; // The sampler pool, used to create a sampler for the texture
 
     utils::Gbuffer m_gBuffer; // The G-Buffer
 
     VkSurfaceKHR m_surface{}; // The window surface
     VkExtent2D m_windowSize{800, 600}; // The window size
-public:
     VkExtent2D m_viewportSize{800, 600}; // The viewport area in the window
-private:
     VkPipelineLayout m_graphicPipelineLayout{}; // The pipeline layout use with graphics pipeline
     VkPipelineLayout m_computePipelineLayout{}; // The pipeline layout use with compute pipeline
     VkPipeline m_computePipeline{}; // The compute pipeline
@@ -2390,6 +2411,7 @@ private:
     VkPipeline m_graphicsPipelineWithoutTexture{}; // The graphics pipeline without texture
     VkCommandPool m_transientCmdPool{}; // The command pool
     VkDescriptorPool m_descriptorPool{}; // Application descriptor pool
+    VkDescriptorPool m_imguiDescriptorPool{}; // Separate pool for ImGui
     VkDescriptorSetLayout m_textureDescriptorSetLayout{}; // Descriptor set layout for all textures (set 0)
     VkDescriptorSetLayout m_graphicDescriptorSetLayout{}; // Descriptor set layout for the scene info (set 1)
     VkDescriptorSet m_textureDescriptorSet{}; // Application descriptor set (storing all textures)
@@ -2405,11 +2427,11 @@ private:
     std::vector<FrameData> m_frameData{}; // Collection of per-frame resources to support multiple frames in flight
     VkSemaphore m_frameTimelineSemaphore{}; // Timeline semaphore used to synchronize CPU submission with GPU completion
     uint32_t m_frameRingCurrent{0}; // Current frame index in the ring buffer (cycles through available frames)
-public:
+    
     bool m_vSync{false}; // VSync on or off
-private:
     int m_imageID{0}; // The current image to display
-    uint32_t m_maxTextures{10000}; // Maximum textures allowed in the application
+    uint32_t m_maxTextures{1}; // Maximum textures allowed in the application
+    
     int32_t* m_downloadedEntityIDPtr = nullptr; // Pointer to mapped entity ID buffer
     utils::Buffer m_downloadedEntityIDBuffer{}; // Buffer handle for cleanup
 };

@@ -37,7 +37,11 @@ add_executable(${MYPROJ}
     src/RendererAPI.h
     src/VulkanRendererAPI.cpp
     src/VulkanRendererAPI.h
-    )
+    src/Texture.cpp
+    src/Texture.h
+    src/VulkanTexture.cpp
+    src/VulkanTexture.h
+  )
     
     set_target_properties(${MYPROJ} PROPERTIES
   MACOSX_BUNDLE TRUE

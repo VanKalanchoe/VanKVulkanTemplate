@@ -25,10 +25,16 @@ printf("\n");                                                                   
  *  - render the scene.
 -*/
 
+/*utils::ResourceAllocator VulkanRendererAPI::m_allocator;*/
+VulkanRendererAPI* VulkanRendererAPI::s_instance = nullptr;
+
 VulkanRendererAPI::VulkanRendererAPI() = default;
 
 VulkanRendererAPI::VulkanRendererAPI(const Config& config) : m_windowSize({config.width, config.height})
 {
+    // Set this instance as the static instance
+    s_instance = this;
+    
     // Vulkan Loader
     VK_CHECK(volkInitialize());
     // Create the GLTF Window
@@ -45,11 +51,93 @@ VulkanRendererAPI::VulkanRendererAPI(const Config& config) : m_windowSize({confi
         SDL_Log("Couldn't create window: %s", SDL_GetError());
         return;
     }
+    
     init();
+}
+
+uint32_t VulkanRendererAPI::AddTextureToPool(utils::ImageResource&& imageResource)
+{
+    // Add the texture to the image vector
+    m_image.emplace_back(std::move(imageResource));
+    
+    // Update the descriptor set to include the new texture
+    updateGraphicsDescriptorSet();
+    
+    // Return the index of the new texture
+    return static_cast<uint32_t>(m_image.size() - 1);
+}
+
+void VulkanRendererAPI::RemoveTextureFromPool(uint32_t index)
+{
+    // Safety checks
+    if (index >= m_image.size()) {
+        LOGW("Attempted to remove texture at invalid index: %u (max: %zu)", index, m_image.size());
+        return;
+    }
+    
+    if (m_image.empty()) {
+        LOGW("Attempted to remove texture from empty pool");
+        return;
+    }
+    
+    // Destroy the texture resource
+    m_allocator.destroyImageResource(m_image[index]);
+    
+    // Remove from vector
+    m_image.erase(m_image.begin() + index);
+    
+    // Update descriptor set
+    updateGraphicsDescriptorSet();
+    
+    LOGI("Removed texture at index %u, remaining textures: %zu", index, m_image.size());
+}
+
+void VulkanRendererAPI::ResizeDescriptor()
+{
+    std::cout << "ResizeDescriptor: Recreating descriptor resources" << std::endl;
+    
+    VkDevice device = m_context.getDevice();
+    VK_CHECK(vkDeviceWaitIdle(device));
+    
+    destroyGraphicsPipeline();
+    
+    vkDestroyDescriptorSetLayout(device, m_textureDescriptorSetLayout, nullptr);
+    vkDestroyDescriptorSetLayout(device, m_graphicDescriptorSetLayout, nullptr);
+    vkDestroyDescriptorPool(device, m_descriptorPool, nullptr);
+
+    m_textureDescriptorSetLayout = VK_NULL_HANDLE;
+    m_graphicDescriptorSetLayout = VK_NULL_HANDLE;
+    m_descriptorPool = VK_NULL_HANDLE;
+    m_textureDescriptorSet = VK_NULL_HANDLE;
+
+    m_maxTextures += 100;
+    
+    createDescriptorPool();
+    createGraphicDescriptorSet();
+    createGraphicsPipeline();
+}
+
+VulkanRendererAPI& VulkanRendererAPI::Get() {
+    if (!s_instance) {
+        // If no instance is set, this will crash - which is what we want
+        // because it means we're trying to use Vulkan before it's initialized
+        throw std::runtime_error("VulkanRendererAPI not initialized! Call SetInstance first.");
+    }
+    return *s_instance;
+}
+
+// Add this method
+void VulkanRendererAPI::SetInstance(VulkanRendererAPI* rendererAPI) {
+    s_instance = rendererAPI;
 }
 
 VulkanRendererAPI::~VulkanRendererAPI()
 {
+    // Clear the static instance if it's this instance
+    if (s_instance == this) {
+        s_instance = nullptr;
+    }
+    
     destroy();
     //glfwDestroyWindow(m_window);
     SDL_DestroyWindow(m_window);
@@ -172,16 +260,36 @@ void VulkanRendererAPI::init()
             m_allocator.createBufferAndUploadData(cmd, std::span<const glm::vec2>(s_points),
                                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
         DBG_VK_NAME(m_pointsBuffer.buffer);
-
-        // Load and create the images
-        const std::vector<std::string> searchPaths = {".", "resources", "../resources", "../../resources"};
-        std::string filename = utils::findFile("image1.jpg", searchPaths);
+        
+        /*// Load and create the images
+        const std::vector<std::string> searchPaths = {".", "resources", "../resources", "../../resources"};*/
+        
+        /*std::string filename = utils::findFile("image1.jpg", searchPaths);
         ASSERT(!filename.empty(), "Could not load texture image!");
         m_image[0] = loadAndCreateImage(cmd, filename);
 
         filename = utils::findFile("image2.jpg", searchPaths);
         ASSERT(!filename.empty(), "Could not load texture image!");
         m_image[1] = loadAndCreateImage(cmd, filename);
+
+        filename = utils::findFile("ChernoLogo.png", searchPaths);
+        ASSERT(!filename.empty(), "Could not load texture image!");
+        m_image[2] = loadAndCreateImage(cmd, filename);*/
+
+        /*const std::vector<std::string> textureFilenames = {
+            "image1.jpg",
+            "image2.jpg",
+            "ChernoLogo.png",
+            "char2.png",
+        };*/
+
+        /*for (const auto& filenameStr : textureFilenames)
+        {
+            std::string filename = utils::findFile(filenameStr, searchPaths);
+            ASSERT(!filename.empty(), "Could not load texture image: ");
+            m_image.emplace_back(loadAndCreateImage(cmd, filename));
+        }*/
+        
         utils::endSingleTimeCommands(cmd, m_context.getDevice(), m_transientCmdPool,
                                      m_context.getGraphicsQueue().queue);
     }
@@ -193,8 +301,8 @@ void VulkanRendererAPI::init()
                                                  VMA_MEMORY_USAGE_GPU_ONLY);
     DBG_VK_NAME(m_sceneInfoBuffer.buffer);
 
-    // The image was loaded, now write its information, such that the graphic pipeline knows how to access it
-    updateGraphicsDescriptorSet();
+    /*// The image was loaded, now write its information, such that the graphic pipeline knows how to access it
+    updateGraphicsDescriptorSet();*/
 }
 
 /*--
@@ -226,7 +334,8 @@ void VulkanRendererAPI::destroy()
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
-
+    vkDestroyDescriptorPool(device, m_imguiDescriptorPool, nullptr); // Destroy ImGui pool
+    
     vkFreeDescriptorSets(device, m_descriptorPool, 1, &m_textureDescriptorSet);
 
     vkDestroyPipeline(device, m_computePipeline, nullptr);
@@ -250,9 +359,12 @@ void VulkanRendererAPI::destroy()
     m_allocator.destroyBuffer(m_pointsBuffer);
     m_allocator.destroyBuffer(m_sceneInfoBuffer);
     m_allocator.destroyBuffer(m_indexBuffer);
-    m_allocator.destroyImageResource(m_image[0]);
-    m_allocator.destroyImageResource(m_image[1]);
 
+    for (size_t i = 0; i < std::size(m_image); i++)
+    {
+        m_allocator.destroyImageResource(m_image[i]);
+    }
+    
     unmapDownloadedData();
 
     m_gBuffer.deinit();
@@ -1418,6 +1530,21 @@ void VulkanRendererAPI::initImGui()
     ImGui::CreateContext();
     ImGui::StyleColorsDark();
 
+    // Create separate descriptor pool for ImGui
+    const std::array<VkDescriptorPoolSize, 1> imguiPoolSizes{
+            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000}, // ImGui needs lots of texture descriptors
+        };
+
+    const VkDescriptorPoolCreateInfo imguiPoolInfo = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+        .maxSets = 1000, // ImGui creates many descriptor sets
+        .poolSizeCount = uint32_t(imguiPoolSizes.size()),
+        .pPoolSizes = imguiPoolSizes.data(),
+    };
+    VK_CHECK(vkCreateDescriptorPool(m_context.getDevice(), &imguiPoolInfo, nullptr, &m_imguiDescriptorPool));
+    DBG_VK_NAME(m_imguiDescriptorPool);
+
     ImGui_ImplSDL3_InitForVulkan(m_window);
     static VkFormat imageFormats[] = {m_swapchain.getImageFormat()};
     ImGui_ImplVulkan_InitInfo initInfo = {
@@ -1426,7 +1553,7 @@ void VulkanRendererAPI::initImGui()
         .Device = m_context.getDevice(),
         .QueueFamily = m_context.getGraphicsQueue().familyIndex,
         .Queue = m_context.getGraphicsQueue().queue,
-        .DescriptorPool = m_descriptorPool,
+        .DescriptorPool = m_imguiDescriptorPool,
         .MinImageCount = 2,
         .ImageCount = m_swapchain.getMaxFramesInFlight(),
         .UseDynamicRendering = true,
@@ -1549,7 +1676,7 @@ void VulkanRendererAPI::createGraphicDescriptorSet()
 {
     // First describe the layout of the texture descriptor, what and how many
     {
-        static uint32_t numTextures = m_maxTextures; // We don't need to set the exact number of texture the scene have.
+        uint32_t numTextures = m_maxTextures; // We don't need to set the exact number of texture the scene have.
 
         // In comment, the layout for a storage buffer, which is not used in this sample, but rather a push descriptor (below)
         const std::array<VkDescriptorSetLayoutBinding, 1> layoutBindings{
@@ -1648,13 +1775,19 @@ void VulkanRendererAPI::updateGraphicsDescriptorSet()
     });
     DBG_VK_NAME(sampler);
 
+    // Prepare imageInfos vector automatically sized to m_image's size
+    std::vector<VkDescriptorImageInfo> imageInfos;
+    imageInfos.reserve(m_image.size()); // reserve for efficiency
+
     // The image info
-    std::array<VkDescriptorImageInfo, 2> imageInfos{
-        {
-            {.sampler = sampler, .imageView = m_image[0].view, .imageLayout = m_image[m_imageID].layout},
-            {.sampler = sampler, .imageView = m_image[1].view, .imageLayout = m_image[m_imageID].layout},
-        }
-    };
+    for (size_t i = 0; i < m_image.size(); ++i)
+    {
+        imageInfos.push_back({
+            .sampler = sampler,
+            .imageView = m_image[i].view,
+            .imageLayout = m_image[m_imageID].layout,
+        });
+    }
 
     std::array<VkWriteDescriptorSet, 1> writeDescriptorSets{
         {
@@ -1706,9 +1839,11 @@ void VulkanRendererAPI::updateGraphicsDescriptorSet()
 
 utils::ImageResource VulkanRendererAPI::loadAndCreateImage(VkCommandBuffer cmd, const std::string& filename)
 {
+    stbi_set_flip_vertically_on_load(true); // Flip the image vertically
+    
     // Load the image from disk
     int w, h, comp, req_comp{4};
-    const stbi_uc* data = stbi_load(filename.c_str(), &w, &h, &comp, req_comp);
+    stbi_uc* data = stbi_load(filename.c_str(), &w, &h, &comp, req_comp);
     ASSERT(data != nullptr, "Could not load texture image!");
     const VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
 
@@ -1741,6 +1876,8 @@ utils::ImageResource VulkanRendererAPI::loadAndCreateImage(VkCommandBuffer cmd, 
     };
     VK_CHECK(vkCreateImageView(m_context.getDevice(), &viewInfo, nullptr, &image.view));
     DBG_VK_NAME(image.view);
+
+    stbi_image_free(data);
 
     return image;
 }

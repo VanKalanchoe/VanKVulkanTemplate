@@ -111,6 +111,8 @@ public:
 
     static void SetConfig(const RendererAPI::Config& cfg) { s_Config = cfg; }
 
+    static RendererAPI* GetRendererAPI() { return s_RendererAPI.get(); }
+
 private:
     static RendererAPI::Config s_Config;
     static std::unique_ptr<RendererAPI> s_RendererAPI;
