@@ -6,6 +6,7 @@
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_timer.h>
 
+#include "Buffer.h"
 #include "imgui.h"
 #include "Texture.h"
 #include "VulkanRendererAPI.h"
@@ -20,6 +21,10 @@ std::shared_ptr<Texture2D> m_texture = nullptr;
 std::shared_ptr<Texture2D> m_texture2 = nullptr;
 std::shared_ptr<Texture2D> m_texture3 = nullptr;
 std::shared_ptr<Texture2D> m_texture4 = nullptr;
+
+std::unique_ptr<VertexBuffer> m_VertexBuffer;
+std::unique_ptr<IndexBuffer> m_IndexBuffer;
+
 void Renderer::initRenderer()
 {
     RendererAPI::Config config;
@@ -35,6 +40,9 @@ void Renderer::initRenderer()
     m_texture2 = Texture2D::Create("image2.jpg");
     m_texture3 = Texture2D::Create("ChernoLogo.png");
     m_texture4 = Texture2D::Create("char2.png");
+
+    m_VertexBuffer.reset(VertexBuffer::Create(std::span<const shaderio::Vertex>(s_vertices)));
+    m_IndexBuffer.reset(IndexBuffer::Create(std::span<const uint32_t>(s_indices),0));
 }
 
 void Renderer::useImGui()
@@ -61,6 +69,8 @@ void Renderer::reloadGraphicsPipeline()
     RenderCommand::waitForGraphicsQueueIdle();
     RenderCommand::destroyGraphicsPipeline();
     RenderCommand::createGraphicsPipeline();
+    RenderCommand::destroyComputePipeline();
+    RenderCommand::createComputeShaderPipeline();
 }
 
 SDL_AppResult Renderer::drawFrame()

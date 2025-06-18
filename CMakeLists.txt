@@ -41,6 +41,10 @@ add_executable(${MYPROJ}
     src/Texture.h
     src/VulkanTexture.cpp
     src/VulkanTexture.h
+    src/Buffer.cpp
+    src/Buffer.h
+    src/VulkanBuffer.cpp
+    src/VulkanBuffer.h
   )
     
     set_target_properties(${MYPROJ} PROPERTIES

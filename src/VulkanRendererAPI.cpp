@@ -34,7 +34,7 @@ VulkanRendererAPI::VulkanRendererAPI(const Config& config) : m_windowSize({confi
 {
     // Set this instance as the static instance
     s_instance = this;
-    
+
     // Vulkan Loader
     VK_CHECK(volkInitialize());
     // Create the GLTF Window
@@ -51,7 +51,7 @@ VulkanRendererAPI::VulkanRendererAPI(const Config& config) : m_windowSize({confi
         SDL_Log("Couldn't create window: %s", SDL_GetError());
         return;
     }
-    
+
     init();
 }
 
@@ -59,10 +59,10 @@ uint32_t VulkanRendererAPI::AddTextureToPool(utils::ImageResource&& imageResourc
 {
     // Add the texture to the image vector
     m_image.emplace_back(std::move(imageResource));
-    
+
     // Update the descriptor set to include the new texture
     updateGraphicsDescriptorSet();
-    
+
     // Return the index of the new texture
     return static_cast<uint32_t>(m_image.size() - 1);
 }
@@ -70,37 +70,39 @@ uint32_t VulkanRendererAPI::AddTextureToPool(utils::ImageResource&& imageResourc
 void VulkanRendererAPI::RemoveTextureFromPool(uint32_t index)
 {
     // Safety checks
-    if (index >= m_image.size()) {
+    if (index >= m_image.size())
+    {
         LOGW("Attempted to remove texture at invalid index: %u (max: %zu)", index, m_image.size());
         return;
     }
-    
-    if (m_image.empty()) {
+
+    if (m_image.empty())
+    {
         LOGW("Attempted to remove texture from empty pool");
         return;
     }
-    
+
     // Destroy the texture resource
     m_allocator.destroyImageResource(m_image[index]);
-    
+
     // Remove from vector
     m_image.erase(m_image.begin() + index);
-    
+
     // Update descriptor set
     updateGraphicsDescriptorSet();
-    
+
     LOGI("Removed texture at index %u, remaining textures: %zu", index, m_image.size());
 }
 
 void VulkanRendererAPI::ResizeDescriptor()
 {
     std::cout << "ResizeDescriptor: Recreating descriptor resources" << std::endl;
-    
+
     VkDevice device = m_context.getDevice();
     VK_CHECK(vkDeviceWaitIdle(device));
-    
+
     destroyGraphicsPipeline();
-    
+
     vkDestroyDescriptorSetLayout(device, m_textureDescriptorSetLayout, nullptr);
     vkDestroyDescriptorSetLayout(device, m_graphicDescriptorSetLayout, nullptr);
     vkDestroyDescriptorPool(device, m_descriptorPool, nullptr);
@@ -111,14 +113,16 @@ void VulkanRendererAPI::ResizeDescriptor()
     m_textureDescriptorSet = VK_NULL_HANDLE;
 
     m_maxTextures += 100;
-    
+
     createDescriptorPool();
     createGraphicDescriptorSet();
     createGraphicsPipeline();
 }
 
-VulkanRendererAPI& VulkanRendererAPI::Get() {
-    if (!s_instance) {
+VulkanRendererAPI& VulkanRendererAPI::Get()
+{
+    if (!s_instance)
+    {
         // If no instance is set, this will crash - which is what we want
         // because it means we're trying to use Vulkan before it's initialized
         throw std::runtime_error("VulkanRendererAPI not initialized! Call SetInstance first.");
@@ -127,17 +131,19 @@ VulkanRendererAPI& VulkanRendererAPI::Get() {
 }
 
 // Add this method
-void VulkanRendererAPI::SetInstance(VulkanRendererAPI* rendererAPI) {
+void VulkanRendererAPI::SetInstance(VulkanRendererAPI* rendererAPI)
+{
     s_instance = rendererAPI;
 }
 
 VulkanRendererAPI::~VulkanRendererAPI()
 {
     // Clear the static instance if it's this instance
-    if (s_instance == this) {
+    if (s_instance == this)
+    {
         s_instance = nullptr;
     }
-    
+
     destroy();
     //glfwDestroyWindow(m_window);
     SDL_DestroyWindow(m_window);
@@ -243,27 +249,27 @@ void VulkanRendererAPI::init()
     // Create GPU buffers (SSBO) containing the vertex data and the point data, and the image (uploading data to GPU)
     {
         VkCommandBuffer cmd = utils::beginSingleTimeCommands(m_context.getDevice(), m_transientCmdPool);
-        // Buffer of all vertices
+        /*// Buffer of all vertices
         m_vertexBuffer = m_allocator.createBufferAndUploadData(cmd, std::span<const shaderio::Vertex>(s_vertices),
                                                                VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
                                                                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
-        DBG_VK_NAME(m_vertexBuffer.buffer);
+        DBG_VK_NAME(m_vertexBuffer.buffer);*/
 
-        // Create and upload index buffer
+        /*// Create and upload index buffer
         m_indexBuffer = m_allocator.createBufferAndUploadData(cmd,
                                                               std::span<const uint32_t>(s_indices),
                                                               VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
-        DBG_VK_NAME(m_indexBuffer.buffer);
+        DBG_VK_NAME(m_indexBuffer.buffer);*/
 
         // Buffer of the points
         m_pointsBuffer =
             m_allocator.createBufferAndUploadData(cmd, std::span<const glm::vec2>(s_points),
                                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
         DBG_VK_NAME(m_pointsBuffer.buffer);
-        
+
         /*// Load and create the images
         const std::vector<std::string> searchPaths = {".", "resources", "../resources", "../../resources"};*/
-        
+
         /*std::string filename = utils::findFile("image1.jpg", searchPaths);
         ASSERT(!filename.empty(), "Could not load texture image!");
         m_image[0] = loadAndCreateImage(cmd, filename);
@@ -289,7 +295,7 @@ void VulkanRendererAPI::init()
             ASSERT(!filename.empty(), "Could not load texture image: ");
             m_image.emplace_back(loadAndCreateImage(cmd, filename));
         }*/
-        
+
         utils::endSingleTimeCommands(cmd, m_context.getDevice(), m_transientCmdPool,
                                      m_context.getGraphicsQueue().queue);
     }
@@ -318,6 +324,14 @@ void VulkanRendererAPI::destroyGraphicsPipeline() const
     vkDestroyPipelineLayout(device, m_graphicPipelineLayout, nullptr);
 }
 
+void VulkanRendererAPI::destroyComputePipeline() const
+{
+    VkDevice device = m_context.getDevice();
+    
+    vkDestroyPipeline(device, m_computePipeline, nullptr);
+    vkDestroyPipelineLayout(device, m_computePipelineLayout, nullptr);
+}
+
 void VulkanRendererAPI::waitForGraphicsQueueIdle()
 {
     vkQueueWaitIdle(m_context.getGraphicsQueue().queue);
@@ -335,7 +349,7 @@ void VulkanRendererAPI::destroy()
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
     vkDestroyDescriptorPool(device, m_imguiDescriptorPool, nullptr); // Destroy ImGui pool
-    
+
     vkFreeDescriptorSets(device, m_descriptorPool, 1, &m_textureDescriptorSet);
 
     vkDestroyPipeline(device, m_computePipeline, nullptr);
@@ -364,7 +378,7 @@ void VulkanRendererAPI::destroy()
     {
         m_allocator.destroyImageResource(m_image[i]);
     }
-    
+
     unmapDownloadedData();
 
     m_gBuffer.deinit();
@@ -732,7 +746,7 @@ void VulkanRendererAPI::recordComputeCommands(VanKCommandBuffer cmd) const
         .bufferAddress = m_vertexBuffer.address, // Address of the buffer to work on
         /*.rotationAngle = 1.2f * ImGui::GetIO().DeltaTime,  // Rotation speed adjusted with framerate*/
         .rotationAngle = 1.2f * deltaTime,
-        .numVertex = 3, // We only touch the first 3 vertex (first triangle)
+        .numVertex = 4, // We only touch the first 3 vertex (first triangle)
     };
 
     const VkPushConstantsInfoKHR pushInfo{
@@ -918,7 +932,7 @@ void VulkanRendererAPI::recordGraphicCommands(VanKCommandBuffer cmd)
 
     // Draw the first triangle without texture (pipeline with specialization constant set to false)
     vkCmdBindPipeline(Unwrap(cmd), VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipelineWithoutTexture);
-    vkCmdDrawIndexed(Unwrap(cmd), 3, 1, 0, 0, 0); // 3 indices, 1 instance, 0 index offset, 0 vertex offset
+    vkCmdDrawIndexed(Unwrap(cmd), 6, 1, 0, 0, 0); // 3 indices, 1 instance, 0 index offset, 0 vertex offset
 
     // Push constant again, with different information
     pushValues.color = glm::vec3(0, 1, 0);
@@ -926,7 +940,7 @@ void VulkanRendererAPI::recordGraphicCommands(VanKCommandBuffer cmd)
 
     // Draw the second triangle with texture
     vkCmdBindPipeline(Unwrap(cmd), VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipelineWithTexture);
-    vkCmdDrawIndexed(Unwrap(cmd), 3, 1, 3, 0, 0); // 3 indices, 1 instance, 3 index offset, 0 vertex offset
+    vkCmdDrawIndexed(Unwrap(cmd), 6, 1, 6, 0, 0); // 3 indices, 1 instance, 3 index offset, 0 vertex offset
 
     vkCmdEndRendering(Unwrap(cmd));
     utils::cmdTransitionImageLayout(Unwrap(cmd), m_gBuffer.getColorImage(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -1082,7 +1096,7 @@ CompileResultMulti compileSlangToSpirvMultiple(
     sessionDesc.targetCount = 1;
 
     static const std::string shaderDir = "../../shaders";
-    const char* searchPaths[] = { shaderDir.c_str() };
+    const char* searchPaths[] = {shaderDir.c_str()};
     sessionDesc.searchPaths = searchPaths;
     sessionDesc.searchPathCount = 1;
 
@@ -1115,15 +1129,18 @@ CompileResultMulti compileSlangToSpirvMultiple(
     for (auto const& entryPointName : entryPointNames)
     {
         Slang::ComPtr<slang::IEntryPoint> entryPoint;
-        if (SLANG_FAILED(slangModule->findEntryPointByName(entryPointName.c_str(), entryPoint.writeRef())) || !entryPoint)
+        if (SLANG_FAILED(slangModule->findEntryPointByName(entryPointName.c_str(), entryPoint.writeRef())) || !
+            entryPoint)
         {
             result.diagnostics += "\nFailed to find entry point: " + entryPointName;
             continue;
         }
 
-        std::array<slang::IComponentType*, 2> components = { slangModule.get(), entryPoint.get() };
+        std::array<slang::IComponentType*, 2> components = {slangModule.get(), entryPoint.get()};
         Slang::ComPtr<slang::IComponentType> composite;
-        if (SLANG_FAILED(session->createCompositeComponentType(components.data(), components.size(), composite.writeRef(), diagnosticsBlob.writeRef())))
+        if (SLANG_FAILED(
+            session->createCompositeComponentType(components.data(), components.size(), composite.writeRef(),
+                diagnosticsBlob.writeRef())))
         {
             if (diagnosticsBlob) result.diagnostics += static_cast<const char*>(diagnosticsBlob->getBufferPointer());
             continue;
@@ -1174,7 +1191,7 @@ std::unordered_map<std::string, std::vector<uint32_t>> loadOrCompileShadersSlang
     if (!result.succeeded)
     {
         std::cerr << "Slang shader compilation failed for module '" << moduleName << "':\n"
-                  << result.diagnostics << "\n";
+            << result.diagnostics << "\n";
 
         // Attempt fallback: load cached SPIR-V for all entry points
         std::unordered_map<std::string, std::vector<uint32_t>> fallbackSpv;
@@ -1186,7 +1203,7 @@ std::unordered_map<std::string, std::vector<uint32_t>> loadOrCompileShadersSlang
             if (cachedSpv.empty())
             {
                 std::cerr << "Fallback SPIR-V cache for entry point '" << entry << "' is empty or missing at: "
-                          << cacheFile << "\n";
+                    << cacheFile << "\n";
                 fallbackSucceeded = false;
                 break;
             }
@@ -1195,7 +1212,9 @@ std::unordered_map<std::string, std::vector<uint32_t>> loadOrCompileShadersSlang
 
         if (!fallbackSucceeded)
         {
-            throw std::runtime_error("Shader compilation failed and fallback SPIR-V cache is missing or invalid for module '" + moduleName + "'");
+            throw std::runtime_error(
+                "Shader compilation failed and fallback SPIR-V cache is missing or invalid for module '" + moduleName +
+                "'");
         }
 
         return fallbackSpv;
@@ -1272,9 +1291,9 @@ void VulkanRendererAPI::createGraphicsPipeline()
     };
 
     std::vector<std::string> entryPoints = {"vertexMain", "fragmentMain"};
-    
-    auto spirvShaders = loadOrCompileShadersSlang("shaderModule", shaderFile, entryPoints, cacheFiles);
-    
+
+    auto spirvShaders = loadOrCompileShadersSlang("slangShaderModule", shaderFile, entryPoints, cacheFiles);
+
     std::vector<uint32_t> vertSpv = spirvShaders["vertexMain"];
     std::vector<uint32_t> fragSpv = spirvShaders["fragmentMain"];
 #else
@@ -1530,20 +1549,7 @@ void VulkanRendererAPI::initImGui()
     ImGui::CreateContext();
     ImGui::StyleColorsDark();
 
-    // Create separate descriptor pool for ImGui
-    const std::array<VkDescriptorPoolSize, 1> imguiPoolSizes{
-            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000}, // ImGui needs lots of texture descriptors
-        };
-
-    const VkDescriptorPoolCreateInfo imguiPoolInfo = {
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
-        .maxSets = 1000, // ImGui creates many descriptor sets
-        .poolSizeCount = uint32_t(imguiPoolSizes.size()),
-        .pPoolSizes = imguiPoolSizes.data(),
-    };
-    VK_CHECK(vkCreateDescriptorPool(m_context.getDevice(), &imguiPoolInfo, nullptr, &m_imguiDescriptorPool));
-    DBG_VK_NAME(m_imguiDescriptorPool);
+    createImGuiDescriptorPool();
 
     ImGui_ImplSDL3_InitForVulkan(m_window);
     static VkFormat imageFormats[] = {m_swapchain.getImageFormat()};
@@ -1661,6 +1667,24 @@ void VulkanRendererAPI::createDescriptorPool()
     };
     VK_CHECK(vkCreateDescriptorPool(m_context.getDevice(), &poolInfo, nullptr, &m_descriptorPool));
     DBG_VK_NAME(m_descriptorPool);
+}
+
+void VulkanRendererAPI::createImGuiDescriptorPool()
+{
+    // Create separate descriptor pool for ImGui
+    const std::array<VkDescriptorPoolSize, 1> imguiPoolSizes{
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000}, // ImGui needs lots of texture descriptors
+    };
+
+    const VkDescriptorPoolCreateInfo imguiPoolInfo = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+        .maxSets = 1000, // ImGui creates many descriptor sets
+        .poolSizeCount = uint32_t(imguiPoolSizes.size()),
+        .pPoolSizes = imguiPoolSizes.data(),
+    };
+    VK_CHECK(vkCreateDescriptorPool(m_context.getDevice(), &imguiPoolInfo, nullptr, &m_imguiDescriptorPool));
+    DBG_VK_NAME(m_imguiDescriptorPool);
 }
 
 /*--
@@ -1840,7 +1864,7 @@ void VulkanRendererAPI::updateGraphicsDescriptorSet()
 utils::ImageResource VulkanRendererAPI::loadAndCreateImage(VkCommandBuffer cmd, const std::string& filename)
 {
     stbi_set_flip_vertically_on_load(true); // Flip the image vertically
-    
+
     // Load the image from disk
     int w, h, comp, req_comp{4};
     stbi_uc* data = stbi_load(filename.c_str(), &w, &h, &comp, req_comp);
@@ -1902,18 +1926,37 @@ void VulkanRendererAPI::createComputeShaderPipeline()
     VK_CHECK(vkCreatePipelineLayout(m_context.getDevice(), &pipelineLayoutInfo, nullptr, &m_computePipelineLayout));
     DBG_VK_NAME(m_computePipelineLayout);
 
-    // Creating the pipeline to run the compute shader
+
+    const std::vector<std::string> searchPaths = {".", "shaders", "../shaders", "../../shaders"};
+
 #ifdef USE_SLANG
-    VkShaderModule compute = utils::createShaderModule(m_context.getDevice(), {
-                                                           shader_comp_slang, std::size(shader_comp_slang)
-                                                       });
+    std::string compShaderFile = utils::findFile("shader.comp.slang", searchPaths);
+    std::cout << "Shader file: " << compShaderFile << '\n';
+
+    std::unordered_map<std::string, std::string> cacheFiles = {
+        {"main", "comp.spv"},
+    };
+
+    std::vector<std::string> entryPoints = {"main"};
+
+    auto spirvShaders = loadOrCompileShadersSlang("slangShaderModule", compShaderFile, entryPoints, cacheFiles);
+
+    std::vector<uint32_t> compSpv = spirvShaders["main"];
 #else
-    VkShaderModule compute = utils::createShaderModule(m_context.getDevice(), {
-                                                           shader_comp_glsl, std::size(shader_comp_glsl)
-                                                       });
+    std::string compShaderFile = utils::findFile("shader.comp.glsl", searchPaths);
+    std::cout << "Shader file: " << compShaderFile << '\n';
+
+    // Load and compile vertex shader
+    std::vector<uint32_t> compSpv = loadOrCompileShader("computeModule", compShaderFile, "main", "comp.spv");
+
 #endif
+    const char* compEntryName = "main";
+
+    // Convert SPIR-V to Vulkan shader modules
+    VkShaderModule compute = utils::createShaderModule(m_context.getDevice(), compSpv);
     DBG_VK_NAME(compute);
 
+    // Creating the pipeline to run the compute shader
     const std::array<VkComputePipelineCreateInfo, 1> pipelineInfo{
         {
             {
@@ -1923,7 +1966,7 @@ void VulkanRendererAPI::createComputeShaderPipeline()
                     .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
                     .stage = VK_SHADER_STAGE_COMPUTE_BIT,
                     .module = compute,
-                    .pName = "main",
+                    .pName = compEntryName,
                 },
                 .layout = m_computePipelineLayout,
             }

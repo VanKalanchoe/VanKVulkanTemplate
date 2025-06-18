@@ -42,6 +42,8 @@ public:
     virtual int32_t* downloadColorAttachmentEntityID() = 0;
     virtual void destroyGraphicsPipeline() const = 0;
     virtual void createGraphicsPipeline() = 0;
+    virtual void createComputeShaderPipeline() = 0;
+    virtual void destroyComputePipeline() const = 0;
     virtual void waitForGraphicsQueueIdle() = 0;
 
     // In RendererAPI.h

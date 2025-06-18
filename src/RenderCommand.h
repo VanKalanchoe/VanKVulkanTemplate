@@ -42,6 +42,10 @@ public:
 
     static void createGraphicsPipeline() { if (s_RendererAPI) s_RendererAPI->createGraphicsPipeline(); }
 
+    static void createComputeShaderPipeline() { if (s_RendererAPI) s_RendererAPI->createComputeShaderPipeline(); }
+
+    static void destroyComputePipeline() { if (s_RendererAPI) s_RendererAPI->destroyComputePipeline(); }
+
     static void waitForGraphicsQueueIdle() { if (s_RendererAPI) s_RendererAPI->waitForGraphicsQueueIdle(); }
 
     static void SetVSync(bool enable)

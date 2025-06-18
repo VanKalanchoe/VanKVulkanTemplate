@@ -181,28 +181,48 @@ struct Vertex : public shaderio::Vertex
     }
 };
 
-// 2x3 vertices with a position, color and texCoords, make two CCW triangles
+/*// 2x3 vertices with a position, color and texCoords, make two CCW triangles
 static const auto s_vertices = std::to_array<shaderio::Vertex>({
-    {{0.0F, -0.5F, 0.5F}, {1.0F, 0.0F, 0.0F}, {0.5F, 0.5F}}, // Colored triangle
+    {{0.0F, -0.5F, 0.5F}, {1.0F, 0.0F, 0.0F}, {0.5F, 0.5F}},  // Colored triangle
     {{-0.5F, 0.5F, 0.5F}, {0.0F, 0.0F, 1.0F}, {0.5F, 0.5F}},
     {{0.5F, 0.5F, 0.5F}, {0.0F, 1.0F, 0.0F}, {0.5F, 0.5F}},
     //
-    {{0.1F, -0.4F, 0.75F}, {.3F, .3F, .3F}, {0.5F, 1.0F}}, // White triangle (textured)
+    {{0.1F, -0.4F, 0.75F}, {.3F, .3F, .3F}, {0.5F, 1.0F}},  // White triangle (textured)
     {{-0.4F, 0.6F, 0.25F}, {1.0F, 1.0F, 1.0F}, {1.0F, 0.0F}},
     {{0.6F, 0.6F, 0.75F}, {.7F, .7F, .7F}, {0.0F, 0.0F}},
 });
+
 
 // Indices for the two triangles
 static const auto s_indices = std::to_array<uint32_t>({
     0, 1, 2, // First triangle (colored)
     3, 4, 5 // Second triangle (textured)
-});
+});*/
+
+// 2x3 vertices with a position, color and texCoords, make two CCW triangles
+/*static const auto s_vertices = std::to_array<shaderio::Vertex>({
+         {{-0.5F, -0.5F, 0.0F}, {1.0F, 0.0F, 0.0F}, {0.0F, 0.0F}}, // 0
+        {{-0.5F,  0.5F, 0.0F}, {0.0F, 1.0F, 0.0F}, {0.0F, 1.0F}}, // 1
+        {{ 0.5F,  0.5F, 0.0F}, {0.0F, 0.0F, 1.0F}, {1.0F, 1.0F}}, // 2
+        {{ 0.5F, -0.5F, 0.0F}, {1.0F, 1.0F, 0.0F}, {1.0F, 0.0F}}, // 3
+   
+    {{-0.4F, -0.4F, 0.75F}, {0.3F, 0.3F, 0.3F}, {0.0F, 1.0F}}, // 4 Textured triangle 
+    {{-0.4F,  0.6F, 0.25F}, {1.0F, 1.0F, 1.0F}, {0.0F, 0.0F}}, // 5
+    {{ 0.6F,  0.6F, 0.25F}, {0.7F, 0.7F, 0.7F}, {1.0F, 0.0F}}, // 6
+    {{ 0.6F, -0.4F, 0.75F}, {0.7F, 0.7F, 0.7F}, {1.0F, 1.0F}}, // 7
+});*/
+
+
+/*// Indices for the two triangles
+static const auto s_indices = std::to_array<uint32_t>({
+    0, 1, 2, // First triangle (colored)
+    0, 2, 3,
+    4, 5, 6, // Second triangle (textured)
+    4, 6, 7
+});*/
 
 /*
-{{-0.4F, -0.4F, 0.75F}, {0.3F, 0.3F, 0.3F}, {0.0F, 1.0F}}, // 3
-{{-0.4F,  0.6F, 0.75F}, {1.0F, 1.0F, 1.0F}, {0.0F, 0.0F}}, // 4
-{{ 0.6F,  0.6F, 0.75F}, {0.7F, 0.7F, 0.7F}, {1.0F, 0.0F}}, // 5
-{{ 0.6F, -0.4F, 0.75F}, {0.7F, 0.7F, 0.7F}, {1.0F, 1.0F}}, // 6
+
 */
 
 /*0, 1, 2, // First triangle (colored)
@@ -2198,6 +2218,16 @@ public:
     static VulkanRendererAPI* s_instance;
     static void SetInstance(VulkanRendererAPI* rendererAPI);
 
+    void setVertexBuffer(utils::Buffer vertBuffer)
+    {
+        m_vertexBuffer = vertBuffer;
+    }
+
+    void setIndexBuffer(utils::Buffer indexBuffer)
+    {
+        m_indexBuffer = indexBuffer;
+    }
+
     //expose variable end-------
 
 private:
@@ -2225,7 +2255,6 @@ private:
      *    - Sets up ImGui for UI rendering
     -*/
     void init();
-    void destroyGraphicsPipeline() const override;
 
     /*--
      * Destroy all resources and the Vulkan context
@@ -2337,6 +2366,8 @@ private:
     -*/
     void createGraphicsPipeline() override;
 
+    void destroyGraphicsPipeline() const override;
+
     /*-- Wait until GPU is done using the pipeline to safly destroy --*/
     void waitForGraphicsQueueIdle() override;
 
@@ -2354,6 +2385,7 @@ private:
      * Currently, only ImGui requires a combined image sampler.
     -*/
     void createDescriptorPool();
+    void createImGuiDescriptorPool();
 
     /*--
      * The Vulkan descriptor set defines the resources that are used by the shaders.
@@ -2379,7 +2411,9 @@ private:
     utils::ImageResource loadAndCreateImage(VkCommandBuffer cmd, const std::string& filename);
 
     // Creating the compute shader pipeline
-    void createComputeShaderPipeline();
+    void createComputeShaderPipeline() override;
+
+    void destroyComputePipeline() const override;
 
     // Helper to download color attachment 1 (entity ID buffer) to CPU and keep pointer
     int32_t* downloadColorAttachmentEntityID() override;
@@ -2430,7 +2464,7 @@ private:
     
     bool m_vSync{false}; // VSync on or off
     int m_imageID{0}; // The current image to display
-    uint32_t m_maxTextures{1}; // Maximum textures allowed in the application
+    uint32_t m_maxTextures{10000}; // Maximum textures allowed in the application
     
     int32_t* m_downloadedEntityIDPtr = nullptr; // Pointer to mapped entity ID buffer
     utils::Buffer m_downloadedEntityIDBuffer{}; // Buffer handle for cleanup

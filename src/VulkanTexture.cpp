@@ -1,7 +1,5 @@
 #include "VulkanTexture.h"
 
-#include "RenderCommand.h"
-
 VulkanTexture2D::VulkanTexture2D(const std::string& path)
     : m_Path(path)
 {
@@ -81,7 +79,7 @@ VulkanTexture2D::~VulkanTexture2D()
 {
     // DO NOTHING - the renderer owns the texture
     // The renderer will clean up all textures when it's destroyed
-
+        //maybe for ECS I have to ???
     /*try {
         // Check 1: Is the static instance valid?
         if (!VulkanRendererAPI::s_instance) {
